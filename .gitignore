@@ -2,6 +2,9 @@
 cache/
 out/
 
+# Environment — never commit private keys
+.env
+
 # Ignores development broadcast logs
 !/broadcast
 /broadcast/*/31337/
