@@ -2,8 +2,8 @@
 // Copyright (c) 2026 Krypto Capital LLC (Koinon). All rights reserved.
 pragma solidity 0.8.22;
 
-import { Test } from "forge-std/Test.sol";
-import { PAYEToken } from "../src/PAYEToken.sol";
+import {Test} from "forge-std/Test.sol";
+import {PAYEToken} from "../src/PAYEToken.sol";
 
 // ─── Minimal LZ Endpoint mock ────────────────────────────────────────────────
 // Only implements the two calls made during OApp construction / peer-wiring:
@@ -34,20 +34,24 @@ contract PAYETokenTest is Test {
 
     uint256 constant TOTAL_SUPPLY_UNITS = 125_000_000 * 10 ** 4; // 1_250_000_000_000
 
-    address treasury  = makeAddr("treasury");
-    address alice     = makeAddr("alice");
-    address attacker  = makeAddr("attacker");
+    address treasury = makeAddr("treasury");
+    address alice = makeAddr("alice");
+    address attacker = makeAddr("attacker");
 
     MockEndpointV2 endpoint;
 
-    PAYEToken homeToken;   // Ethereum — mints full supply
+    PAYEToken homeToken; // Ethereum — mints full supply
     PAYEToken remoteToken; // Linea    — zero initial supply
 
     // ── Setup ──────────────────────────────────────────────────────────────────
 
     function setUp() public {
-        endpoint    = new MockEndpointV2();
-        homeToken   = new PAYEToken(address(endpoint), treasury, TOTAL_SUPPLY_UNITS);
+        endpoint = new MockEndpointV2();
+        homeToken = new PAYEToken(
+            address(endpoint),
+            treasury,
+            TOTAL_SUPPLY_UNITS
+        );
         remoteToken = new PAYEToken(address(endpoint), treasury, 0);
     }
 
@@ -129,8 +133,13 @@ contract PAYETokenTest is Test {
         // bytes4(keccak256("mint(address,uint256)")) = 0x40c10f19
         bytes4 mintSelector = bytes4(keccak256("mint(address,uint256)"));
         // The contract should not expose this function; calling it must revert.
-        (bool success, ) = address(homeToken).staticcall(abi.encodeWithSelector(mintSelector, alice, 1));
-        assertFalse(success, "PAYEToken must not expose a public mint function");
+        (bool success, ) = address(homeToken).staticcall(
+            abi.encodeWithSelector(mintSelector, alice, 1)
+        );
+        assertFalse(
+            success,
+            "PAYEToken must not expose a public mint function"
+        );
     }
 
     function test_supplyIsFixed_afterDeploy() public view {
@@ -146,9 +155,9 @@ contract PAYETokenTest is Test {
         vm.prank(treasury);
         assertTrue(homeToken.transfer(alice, amount));
 
-        assertEq(homeToken.balanceOf(alice),    amount);
+        assertEq(homeToken.balanceOf(alice), amount);
         assertEq(homeToken.balanceOf(treasury), TOTAL_SUPPLY_UNITS - amount);
-        assertEq(homeToken.totalSupply(),       TOTAL_SUPPLY_UNITS); // invariant
+        assertEq(homeToken.totalSupply(), TOTAL_SUPPLY_UNITS); // invariant
     }
 
     function test_transfer_revertsOnInsufficientBalance() public {
@@ -160,7 +169,7 @@ contract PAYETokenTest is Test {
     // ── Peer management (owner-only) ───────────────────────────────────────────
 
     function test_setPeer_onlyOwner() public {
-        uint32  remoteEid  = 30183; // Linea Mainnet EID
+        uint32 remoteEid = 30183; // Linea Mainnet EID
         bytes32 remotePeer = bytes32(uint256(uint160(address(remoteToken))));
 
         // Attacker cannot set peer
