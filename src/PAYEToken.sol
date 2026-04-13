@@ -67,11 +67,7 @@ contract PAYEToken is OFT, Ownable2Step {
      * @param initialSupply Amount of PAYE (in smallest units, i.e. × 10**4) to mint
      *                     at deployment.  Must be 0 on remote chains.
      */
-    constructor(
-        address lzEndpoint,
-        address treasury,
-        uint256 initialSupply
-    ) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
+    constructor(address lzEndpoint, address treasury, uint256 initialSupply) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
         require(treasury != address(0), "PAYE: zero treasury");
 
         // OZ v4 Ownable defaults owner to msg.sender (deployer).
@@ -115,15 +111,11 @@ contract PAYEToken is OFT, Ownable2Step {
      *      two-step: the proposed new owner must explicitly accept before the transfer
      *      is finalised, protecting against accidental key-loss.
      */
-    function transferOwnership(
-        address newOwner
-    ) public override(Ownable, Ownable2Step) onlyOwner {
+    function transferOwnership(address newOwner) public override(Ownable, Ownable2Step) onlyOwner {
         Ownable2Step.transferOwnership(newOwner);
     }
 
-    function _transferOwnership(
-        address newOwner
-    ) internal override(Ownable, Ownable2Step) {
+    function _transferOwnership(address newOwner) internal override(Ownable, Ownable2Step) {
         Ownable2Step._transferOwnership(newOwner);
     }
 

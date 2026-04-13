@@ -47,11 +47,7 @@ contract PAYETokenTest is Test {
 
     function setUp() public {
         endpoint = new MockEndpointV2();
-        homeToken = new PAYEToken(
-            address(endpoint),
-            treasury,
-            TOTAL_SUPPLY_UNITS
-        );
+        homeToken = new PAYEToken(address(endpoint), treasury, TOTAL_SUPPLY_UNITS);
         remoteToken = new PAYEToken(address(endpoint), treasury, 0);
     }
 
@@ -133,13 +129,8 @@ contract PAYETokenTest is Test {
         // bytes4(keccak256("mint(address,uint256)")) = 0x40c10f19
         bytes4 mintSelector = bytes4(keccak256("mint(address,uint256)"));
         // The contract should not expose this function; calling it must revert.
-        (bool success, ) = address(homeToken).staticcall(
-            abi.encodeWithSelector(mintSelector, alice, 1)
-        );
-        assertFalse(
-            success,
-            "PAYEToken must not expose a public mint function"
-        );
+        (bool success,) = address(homeToken).staticcall(abi.encodeWithSelector(mintSelector, alice, 1));
+        assertFalse(success, "PAYEToken must not expose a public mint function");
     }
 
     function test_supplyIsFixed_afterDeploy() public view {
