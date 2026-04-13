@@ -14,7 +14,6 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  *         direction of the bridge (e.g. Ethereum → Linea, then Linea → Ethereum).
  *
  *         Required environment variables:
- *           OWNER_PRIVATE_KEY    — private key of the contract owner (treasury)
  *           LOCAL_PAYE_ADDRESS   — address of PAYEToken on THIS chain
  *           REMOTE_EID           — LayerZero endpoint ID of the PEER chain
  *           REMOTE_PAYE_ADDRESS  — address of PAYEToken on the PEER chain
@@ -28,11 +27,13 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  * Usage (Ethereum side):
  *   forge script script/WirePeers.s.sol \
  *     --rpc-url $ETH_RPC_URL \
+ *     --account deployer \
  *     --broadcast
  *
  * Usage (Linea side):
  *   forge script script/WirePeers.s.sol \
  *     --rpc-url $LINEA_RPC_URL \
+ *     --account deployer \
  *     --broadcast
  */
 contract WirePeers is Script {
@@ -40,7 +41,6 @@ contract WirePeers is Script {
         address localPaye = vm.envAddress("LOCAL_PAYE_ADDRESS");
         uint32 remoteEid = uint32(vm.envUint("REMOTE_EID"));
         address remotePaye = vm.envAddress("REMOTE_PAYE_ADDRESS");
-        uint256 ownerKey = vm.envUint("OWNER_PRIVATE_KEY");
 
         require(localPaye != address(0), "WirePeers: zero local");
         require(remotePaye != address(0), "WirePeers: zero remote");
@@ -49,7 +49,7 @@ contract WirePeers is Script {
         // LayerZero peers are stored as bytes32 (accommodates non-EVM addresses like Solana)
         bytes32 peerBytes32 = bytes32(uint256(uint160(remotePaye)));
 
-        vm.startBroadcast(ownerKey);
+        vm.startBroadcast();
 
         PAYEToken(localPaye).setPeer(remoteEid, peerBytes32);
 

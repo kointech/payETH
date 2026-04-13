@@ -11,7 +11,6 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  *         No tokens are minted here; supply arrives exclusively via the LayerZero bridge.
  *
  * @dev    Required environment variables:
- *           DEPLOYER_PRIVATE_KEY   — private key of the deployer account
  *           TREASURY_ADDRESS       — Koinon-controlled wallet (becomes owner/delegate)
  *           LZ_ENDPOINT_ADDRESS    — LayerZero EndpointV2 address on this chain
  *                                    Linea Mainnet:  0x1a44076050125825900e736c501f859c50fE728c
@@ -23,6 +22,7 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  * Usage:
  *   forge script script/DeployRemote.s.sol \
  *     --rpc-url $LINEA_RPC_URL \
+ *     --account deployer \
  *     --broadcast \
  *     --verify \
  *     --verifier blockscout \
@@ -32,12 +32,11 @@ contract DeployRemote is Script {
     function run() external {
         address treasury = vm.envAddress("TREASURY_ADDRESS");
         address lzEndpoint = vm.envAddress("LZ_ENDPOINT_ADDRESS");
-        uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         require(treasury != address(0), "DeployRemote: zero treasury");
         require(lzEndpoint != address(0), "DeployRemote: zero endpoint");
 
-        vm.startBroadcast(deployerKey);
+        vm.startBroadcast();
 
         // initialSupply = 0 on remote chains — supply is bridged in, never freshly minted
         PAYEToken paye = new PAYEToken(lzEndpoint, treasury, 0);

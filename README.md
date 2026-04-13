@@ -47,38 +47,51 @@ foundryup
 cp .env.example .env   # fill in your values
 ```
 
+### Wallet setup
+
+Deployment uses a [`cast wallet`](https://book.getfoundry.sh/reference/cast/cast-wallet) account instead of raw private keys:
+
+```bash
+cast wallet import deployer --interactive
+```
+
+You'll be prompted for the private key and a password to encrypt it on disk.
+
 ### 1 — Deploy on Ethereum (home chain)
 
 ```bash
-forge script script/DeployHome.s.sol \
-  --rpc-url $ETH_RPC_URL \
-  --broadcast \
-  --verify \
-  --etherscan-api-key $ETHERSCAN_API_KEY
+make deploy-home
 ```
 
 ### 2 — Deploy on Linea (remote chain)
 
 ```bash
-forge script script/DeployRemote.s.sol \
-  --rpc-url $LINEA_RPC_URL \
-  --broadcast \
-  --verify \
-  --verifier blockscout \
-  --verifier-url https://api.lineascan.build/api
+make deploy-remote
 ```
 
 ### 3 — Wire peers (run on both chains)
 
-After both deployments, update `.env` with `LOCAL_PAYE_ADDRESS`, `REMOTE_EID`, and `REMOTE_PAYE_ADDRESS`, then run once per chain:
+After both deployments, update `.env` with `LOCAL_PAYE_ADDRESS`, `REMOTE_EID`, and `REMOTE_PAYE_ADDRESS`, then:
 
 ```bash
-# From Ethereum side
-forge script script/WirePeers.s.sol --rpc-url $ETH_RPC_URL --broadcast
-
-# From Linea side
-forge script script/WirePeers.s.sol --rpc-url $LINEA_RPC_URL --broadcast
+make wire
 ```
+
+Or run each side individually:
+
+```bash
+make wire-home
+make wire-remote
+```
+
+### Dry run (simulate without broadcasting)
+
+```bash
+make dry-deploy-home
+make dry-deploy-remote
+```
+
+Override the wallet account: `make deploy-home ACCOUNT=myaccount`
 
 #### LayerZero Endpoint IDs
 
@@ -95,7 +108,8 @@ The Solana OFT representation of PAYE uses the [LayerZero Solana OFT program](ht
 ## Tests
 
 ```bash
-forge test -v
+make test        # or: forge test
+make test-v      # verbose (-vvv)
 ```
 
 19 tests covering: decimals, supply, ownership (Ownable2Step), no-mint guarantee, transfer invariants, peer access control, constructor guards, and a fuzz suite.
@@ -115,54 +129,18 @@ Foundry consists of:
 
 https://book.getfoundry.sh/
 
-## Usage
+## Makefile targets
 
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+| Target | Description |
+|---|---|
+| `make build` | Compile contracts |
+| `make test` | Run test suite |
+| `make test-v` | Run tests with `-vvv` |
+| `make clean` | Remove build artifacts |
+| `make deploy-home` | Deploy to Ethereum |
+| `make deploy-remote` | Deploy to Linea |
+| `make wire-home` | Wire peers (Ethereum side) |
+| `make wire-remote` | Wire peers (Linea side) |
+| `make wire` | Wire both sides |
+| `make dry-deploy-home` | Simulate home deploy |
+| `make dry-deploy-remote` | Simulate remote deploy |
