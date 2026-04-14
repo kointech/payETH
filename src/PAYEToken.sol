@@ -53,10 +53,44 @@ contract PAYEToken is OFT, Ownable2Step {
     /// @notice True on the Ethereum home-chain deployment where the full supply was minted.
     bool public immutable IS_HOME_CHAIN;
 
+    // ─── State ────────────────────────────────────────────────────────────────
+
+    /// @notice Address authorised to call setPeer() on behalf of the owner.
+    address public developer;
+
+    /// @notice Whether the developer role is currently active.
+    bool public developerEnabled;
+
     // ─── Events ───────────────────────────────────────────────────────────────
 
     /// @dev Emitted once at construction when the full supply is minted.
     event SupplyMinted(address indexed treasury, uint256 amount);
+
+    /// @dev Emitted when the developer address is changed.
+    event DeveloperChanged(
+        address indexed previousDeveloper,
+        address indexed newDeveloper
+    );
+
+    /// @dev Emitted when the developer role is enabled or disabled.
+    event DeveloperToggled(bool enabled);
+
+    // ─── Errors ───────────────────────────────────────────────────────────────
+
+    error NotOwnerOrDeveloper();
+
+    // ─── Modifiers ────────────────────────────────────────────────────────────
+
+    /// @dev Allows owner OR (enabled developer) to call the function.
+    modifier onlyOwnerOrDeveloper() {
+        if (
+            msg.sender != owner() &&
+            !(developerEnabled && msg.sender == developer)
+        ) {
+            revert NotOwnerOrDeveloper();
+        }
+        _;
+    }
 
     // ─── Constructor ─────────────────────────────────────────────────────────
 
@@ -67,13 +101,23 @@ contract PAYEToken is OFT, Ownable2Step {
      * @param initialSupply Amount of PAYE (in smallest units, i.e. × 10**4) to mint
      *                     at deployment.  Must be 0 on remote chains.
      */
-    constructor(address lzEndpoint, address treasury, uint256 initialSupply) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
+    constructor(
+        address lzEndpoint,
+        address treasury,
+        uint256 initialSupply
+    ) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
         require(treasury != address(0), "PAYE: zero treasury");
 
         // OZ v4 Ownable defaults owner to msg.sender (deployer).
         // Transfer ownership to the Koinon treasury wallet immediately so that
         // the treasury holds full control from the moment the contract is live.
         _transferOwnership(treasury);
+
+        // Assign the deployer as the initial developer so they can wire peers.
+        developer = msg.sender;
+        developerEnabled = true;
+        emit DeveloperChanged(address(0), msg.sender);
+        emit DeveloperToggled(true);
 
         IS_HOME_CHAIN = (initialSupply > 0);
 
@@ -111,20 +155,58 @@ contract PAYEToken is OFT, Ownable2Step {
      *      two-step: the proposed new owner must explicitly accept before the transfer
      *      is finalised, protecting against accidental key-loss.
      */
-    function transferOwnership(address newOwner) public override(Ownable, Ownable2Step) onlyOwner {
+    function transferOwnership(
+        address newOwner
+    ) public override(Ownable, Ownable2Step) onlyOwner {
         Ownable2Step.transferOwnership(newOwner);
     }
 
-    function _transferOwnership(address newOwner) internal override(Ownable, Ownable2Step) {
+    function _transferOwnership(
+        address newOwner
+    ) internal override(Ownable, Ownable2Step) {
         Ownable2Step._transferOwnership(newOwner);
     }
 
-    // ─── Safety ───────────────────────────────────────────────────────────────
+    // ─── Peer management (owner or developer) ─────────────────────────────────
 
     /**
-     * @notice PAYE has no public mint function.  Supply is fixed at deployment.
-     * @dev    The only way new tokens appear on a chain is via the LayerZero bridge
-     *         (i.e. _credit() inside OFTCore), which is strictly offset by a
-     *         corresponding _debit() on the source chain — total supply is conserved.
+     * @notice Registers a peer OFT contract on a remote chain.
+     * @dev    Overrides OAppCore.setPeer() to allow the developer role in addition
+     *         to the owner.  The owner can always call this regardless of the
+     *         developer toggle.
      */
+    function setPeer(
+        uint32 _eid,
+        bytes32 _peer
+    ) public override onlyOwnerOrDeveloper {
+        _setPeer(_eid, _peer);
+    }
+
+    // ─── Developer management (owner-only) ────────────────────────────────────
+
+    /**
+     * @notice Sets a new developer address.
+     * @param  newDeveloper The address to authorise.  Use address(0) to remove.
+     */
+    function setDeveloper(address newDeveloper) external onlyOwner {
+        address previous = developer;
+        developer = newDeveloper;
+        emit DeveloperChanged(previous, newDeveloper);
+    }
+
+    /**
+     * @notice Enables the developer role.  Owner calls this to let the developer wire peers.
+     */
+    function enableDeveloper() external onlyOwner {
+        developerEnabled = true;
+        emit DeveloperToggled(true);
+    }
+
+    /**
+     * @notice Disables the developer role.  Owner calls this to revoke peer-wiring access.
+     */
+    function disableDeveloper() external onlyOwner {
+        developerEnabled = false;
+        emit DeveloperToggled(false);
+    }
 }

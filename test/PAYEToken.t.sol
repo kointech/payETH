@@ -37,6 +37,7 @@ contract PAYETokenTest is Test {
     address treasury = makeAddr("treasury");
     address alice = makeAddr("alice");
     address attacker = makeAddr("attacker");
+    address dev = makeAddr("developer");
 
     MockEndpointV2 endpoint;
 
@@ -47,7 +48,11 @@ contract PAYETokenTest is Test {
 
     function setUp() public {
         endpoint = new MockEndpointV2();
-        homeToken = new PAYEToken(address(endpoint), treasury, TOTAL_SUPPLY_UNITS);
+        homeToken = new PAYEToken(
+            address(endpoint),
+            treasury,
+            TOTAL_SUPPLY_UNITS
+        );
         remoteToken = new PAYEToken(address(endpoint), treasury, 0);
     }
 
@@ -129,8 +134,13 @@ contract PAYETokenTest is Test {
         // bytes4(keccak256("mint(address,uint256)")) = 0x40c10f19
         bytes4 mintSelector = bytes4(keccak256("mint(address,uint256)"));
         // The contract should not expose this function; calling it must revert.
-        (bool success,) = address(homeToken).staticcall(abi.encodeWithSelector(mintSelector, alice, 1));
-        assertFalse(success, "PAYEToken must not expose a public mint function");
+        (bool success, ) = address(homeToken).staticcall(
+            abi.encodeWithSelector(mintSelector, alice, 1)
+        );
+        assertFalse(
+            success,
+            "PAYEToken must not expose a public mint function"
+        );
     }
 
     function test_supplyIsFixed_afterDeploy() public view {
@@ -164,7 +174,7 @@ contract PAYETokenTest is Test {
         bytes32 remotePeer = bytes32(uint256(uint160(address(remoteToken))));
 
         // Attacker cannot set peer
-        vm.expectRevert();
+        vm.expectRevert(PAYEToken.NotOwnerOrDeveloper.selector);
         vm.prank(attacker);
         homeToken.setPeer(remoteEid, remotePeer);
 
@@ -173,6 +183,117 @@ contract PAYETokenTest is Test {
         homeToken.setPeer(remoteEid, remotePeer);
 
         assertEq(homeToken.peers(remoteEid), remotePeer);
+    }
+
+    // ── Developer role ─────────────────────────────────────────────────────────
+
+    function test_deployer_isInitialDeveloper() public view {
+        // address(this) is the deployer in tests
+        assertEq(homeToken.developer(), address(this));
+        assertTrue(homeToken.developerEnabled());
+    }
+
+    function test_setDeveloper_onlyOwner() public {
+        vm.expectRevert();
+        vm.prank(attacker);
+        homeToken.setDeveloper(dev);
+
+        vm.prank(treasury);
+        homeToken.setDeveloper(dev);
+        assertEq(homeToken.developer(), dev);
+    }
+
+    function test_enableDeveloper_onlyOwner() public {
+        vm.expectRevert();
+        vm.prank(attacker);
+        homeToken.enableDeveloper();
+
+        vm.prank(treasury);
+        homeToken.enableDeveloper();
+        assertTrue(homeToken.developerEnabled());
+    }
+
+    function test_disableDeveloper_onlyOwner() public {
+        vm.prank(treasury);
+        homeToken.enableDeveloper();
+
+        vm.expectRevert();
+        vm.prank(attacker);
+        homeToken.disableDeveloper();
+
+        vm.prank(treasury);
+        homeToken.disableDeveloper();
+        assertFalse(homeToken.developerEnabled());
+    }
+
+    function test_developer_canSetPeer_whenEnabled() public {
+        uint32 remoteEid = 30183;
+        bytes32 remotePeer = bytes32(uint256(uint160(address(remoteToken))));
+
+        // Deployer (address(this)) is the initial developer and already enabled.
+        // Owner changes developer to dev and disables first.
+        vm.startPrank(treasury);
+        homeToken.setDeveloper(dev);
+        homeToken.disableDeveloper();
+        vm.stopPrank();
+
+        // Developer cannot set peer while disabled
+        vm.expectRevert(PAYEToken.NotOwnerOrDeveloper.selector);
+        vm.prank(dev);
+        homeToken.setPeer(remoteEid, remotePeer);
+
+        // Owner enables developer
+        vm.prank(treasury);
+        homeToken.enableDeveloper();
+
+        // Developer can now set peer
+        vm.prank(dev);
+        homeToken.setPeer(remoteEid, remotePeer);
+        assertEq(homeToken.peers(remoteEid), remotePeer);
+    }
+
+    function test_developer_cannotSetPeer_afterDisabled() public {
+        uint32 remoteEid = 30183;
+        bytes32 remotePeer = bytes32(uint256(uint160(address(remoteToken))));
+
+        vm.startPrank(treasury);
+        homeToken.setDeveloper(dev);
+        homeToken.enableDeveloper();
+        vm.stopPrank();
+
+        // Developer can set peer
+        vm.prank(dev);
+        homeToken.setPeer(remoteEid, remotePeer);
+
+        // Owner disables developer
+        vm.prank(treasury);
+        homeToken.disableDeveloper();
+
+        // Developer can no longer set peer
+        vm.expectRevert(PAYEToken.NotOwnerOrDeveloper.selector);
+        vm.prank(dev);
+        homeToken.setPeer(remoteEid, bytes32(0));
+    }
+
+    function test_developer_changeTo_newAddress() public {
+        address dev2 = makeAddr("developer2");
+
+        vm.startPrank(treasury);
+        homeToken.setDeveloper(dev);
+        homeToken.enableDeveloper();
+        homeToken.setDeveloper(dev2);
+        vm.stopPrank();
+
+        assertEq(homeToken.developer(), dev2);
+
+        // Old developer is revoked
+        vm.expectRevert(PAYEToken.NotOwnerOrDeveloper.selector);
+        vm.prank(dev);
+        homeToken.setPeer(30183, bytes32(uint256(1)));
+
+        // New developer works
+        vm.prank(dev2);
+        homeToken.setPeer(30183, bytes32(uint256(1)));
     }
 
     // ── Constructor guards ─────────────────────────────────────────────────────
