@@ -14,21 +14,23 @@ PAYE is the native token of the PayETH project — a single-supply, cross-chain 
 | Total supply | 125,000,000 PAYE (fixed) |
 | Decimal places | 4 |
 | Standard | LayerZero OFT v2 |
-| Home chain | Ethereum (full supply minted here) |
-| Remote chains | Linea (bridged representation) |
-| Future chains | Solana (LayerZero OFT Solana program) |
+| Home chain | Linea (full supply minted here) |
+| Remote chains | Solana (bridged representation) |
+| Future chains | Ethereum, and others (expanding) |
 
 ## Architecture
 
 ```
-Ethereum ──── PAYEToken (OFT) ← mints 125M PAYE to treasury
-                  │
-          LayerZero bridge  (burn ↔ mint, total supply preserved)
-                  │
-Linea    ──── PAYEToken (OFT) ← starts with 0 supply; receives bridged tokens
+Linea  ──── PAYEToken (OFT) ← mints 125M PAYE to treasury
+                │
+        LayerZero bridge  (burn ↔ mint, total supply preserved)
+                │
+Solana ──── PAYEToken (OFT/SPL) ← starts with 0 supply; receives bridged tokens
+                │
+         (more chains to follow)
 ```
 
-Solana bridging requires the [LayerZero Solana OFT program](https://docs.layerzero.network/v2/developers/solana/oft/quickstart) — see the Solana section below.
+Solana bridging uses the [LayerZero Solana OFT program](https://docs.layerzero.network/v2/developers/solana/oft/quickstart) — see the Solana section below.
 
 ## Security
 
@@ -57,13 +59,13 @@ cast wallet import deployer --interactive
 
 You'll be prompted for the private key and a password to encrypt it on disk.
 
-### 1 — Deploy on Ethereum (home chain)
+### 1 — Deploy on Linea (home chain)
 
 ```bash
 make deploy-home
 ```
 
-### 2 — Deploy on Linea (remote chain)
+### 2 — Deploy on Solana (remote chain)
 
 ```bash
 make deploy-remote
@@ -97,13 +99,13 @@ Override the wallet account: `make deploy-home ACCOUNT=myaccount`
 
 | Chain | Mainnet EID | Testnet EID |
 |---|---|---|
-| Ethereum | 30101 | 40161 (Sepolia) |
 | Linea | 30183 | 40287 (Linea Sepolia) |
 | Solana | 30168 | 40168 (Devnet) |
+| Ethereum | 30101 | 40161 (Sepolia) |
 
 ## Solana
 
-The Solana OFT representation of PAYE uses the [LayerZero Solana OFT program](https://docs.layerzero.network/v2/developers/solana/oft/quickstart). It is a separate deployment outside this Foundry project. Tokens bridged to Solana are represented as an SPL token with a corresponding Solana OFT store; bridging burns tokens on the EVM side and mints on Solana (and vice-versa), keeping total supply constant.
+The Solana OFT representation of PAYE uses the [LayerZero Solana OFT program](https://docs.layerzero.network/v2/developers/solana/oft/quickstart). It is maintained in a separate repository: **[kointech/payETH-solana](https://github.com/kointech/payETH-solana)**. Tokens bridged to Solana are represented as an SPL token with a corresponding Solana OFT store; bridging burns tokens on the Linea side and mints on Solana (and vice-versa), keeping total supply constant.
 
 ## Before pushing
 
@@ -147,8 +149,8 @@ https://book.getfoundry.sh/
 | `make test` | Run test suite |
 | `make test-v` | Run tests with `-vvv` |
 | `make clean` | Remove build artifacts |
-| `make deploy-home` | Deploy to Ethereum |
-| `make deploy-remote` | Deploy to Linea |
+| `make deploy-home` | Deploy to Linea |
+| `make deploy-remote` | Deploy to Solana |
 | `make wire-home` | Wire peers (Ethereum side) |
 | `make wire-remote` | Wire peers (Linea side) |
 | `make wire` | Wire both sides |
