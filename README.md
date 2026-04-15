@@ -105,6 +105,16 @@ Override the wallet account: `make deploy-home ACCOUNT=myaccount`
 
 The Solana OFT representation of PAYE uses the [LayerZero Solana OFT program](https://docs.layerzero.network/v2/developers/solana/oft/quickstart). It is a separate deployment outside this Foundry project. Tokens bridged to Solana are represented as an SPL token with a corresponding Solana OFT store; bridging burns tokens on the EVM side and mints on Solana (and vice-versa), keeping total supply constant.
 
+## Before pushing
+
+Always run the formatter before committing or pushing:
+
+```bash
+forge fmt
+```
+
+CI enforces this with `forge fmt --check` — any unformatted files will fail the pipeline.
+
 ## Tests
 
 ```bash
