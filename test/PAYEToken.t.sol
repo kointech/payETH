@@ -1,5 +1,27 @@
-// SPDX-License-Identifier: MIT
-// Copyright (c) 2026 Krypto Capital LLC (Koinon). All rights reserved.
+// SPDX-License-Identifier: UNLICENSED
+//
+// PAYE / PayETH — Omnichain Fungible Token (LayerZero OFT v2)
+// Issued by a United States Entity (US Virgin Islands)
+// ─────────────────────────────────────────────────────────────────────────────
+// Beneficially owned 100% by Matthew Mecke and/or assigns.
+// Held and issued through Krypto Capital LLC, a US Virgin Islands registered
+// company (interim holding entity), pending establishment of a successor USVI
+// holding company.  All rights, title, and interest in this code, the PAYE
+// token, and all related intellectual property vest solely in Matthew Mecke
+// and/or his designated assigns or successor entities.
+//
+// IP © 2025–2026 Matthew Mecke / Krypto Capital LLC (Koinon). All rights reserved.
+//
+// This code was developed under instruction from Matthew Mecke commencing
+// December 1, 2025.  At that time the beneficial owner advised that the final
+// corporate ownership structure was yet to be established; Krypto Capital LLC
+// is therefore named as the interim issuing entity.  Any successor USVI entity
+// established by Matthew Mecke shall automatically succeed to all rights herein
+// by corporate IP assignment without affecting the validity of this notice.
+//
+// No licence to reproduce, distribute, or create derivative works is granted
+// without prior written consent of the beneficial owner.
+// ─────────────────────────────────────────────────────────────────────────────
 pragma solidity 0.8.22;
 
 import {Test} from "forge-std/Test.sol";
@@ -48,7 +70,11 @@ contract PAYETokenTest is Test {
 
     function setUp() public {
         endpoint = new MockEndpointV2();
-        homeToken = new PAYEToken(address(endpoint), treasury, TOTAL_SUPPLY_UNITS);
+        homeToken = new PAYEToken(
+            address(endpoint),
+            treasury,
+            TOTAL_SUPPLY_UNITS
+        );
         remoteToken = new PAYEToken(address(endpoint), treasury, 0);
     }
 
@@ -130,8 +156,13 @@ contract PAYETokenTest is Test {
         // bytes4(keccak256("mint(address,uint256)")) = 0x40c10f19
         bytes4 mintSelector = bytes4(keccak256("mint(address,uint256)"));
         // The contract should not expose this function; calling it must revert.
-        (bool success,) = address(homeToken).staticcall(abi.encodeWithSelector(mintSelector, alice, 1));
-        assertFalse(success, "PAYEToken must not expose a public mint function");
+        (bool success, ) = address(homeToken).staticcall(
+            abi.encodeWithSelector(mintSelector, alice, 1)
+        );
+        assertFalse(
+            success,
+            "PAYEToken must not expose a public mint function"
+        );
     }
 
     function test_supplyIsFixed_afterDeploy() public view {
