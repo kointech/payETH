@@ -70,8 +70,6 @@ contract DeployRemote is Script {
         console2.log("Treasury   :", treasury);
         console2.log("isHomeChain:", paye.isHomeChain());
         console2.log("Decimals   :", paye.decimals());
-        console2.log(
-            "NOTE: Run WirePeers.s.sol to link with home-chain deployment."
-        );
+        console2.log("NOTE: Run WirePeers.s.sol to link with home-chain deployment.");
     }
 }

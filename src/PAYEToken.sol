@@ -83,10 +83,7 @@ contract PAYEToken is OFT, Ownable2Step {
     event SupplyMinted(address indexed treasury, uint256 indexed amount);
 
     /// @dev Emitted when the developer address is changed.
-    event DeveloperChanged(
-        address indexed previousDeveloper,
-        address indexed newDeveloper
-    );
+    event DeveloperChanged(address indexed previousDeveloper, address indexed newDeveloper);
 
     /// @dev Emitted when the developer role is enabled or disabled.
     event DeveloperToggled(bool indexed enabled);
@@ -99,10 +96,7 @@ contract PAYEToken is OFT, Ownable2Step {
 
     /// @dev Allows owner OR (enabled developer) to call the function.
     modifier onlyOwnerOrDeveloper() {
-        if (
-            msg.sender != owner() &&
-            !(developerEnabled && msg.sender == developer)
-        ) {
+        if (msg.sender != owner() && !(developerEnabled && msg.sender == developer)) {
             revert NotOwnerOrDeveloper();
         }
         _;
@@ -117,11 +111,7 @@ contract PAYEToken is OFT, Ownable2Step {
      * @param initialSupply Amount of PAYE (in smallest units, i.e. × 10**4) to mint
      *                     at deployment.  Must be 0 on remote chains.
      */
-    constructor(
-        address lzEndpoint,
-        address treasury,
-        uint256 initialSupply
-    ) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
+    constructor(address lzEndpoint, address treasury, uint256 initialSupply) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
         require(treasury != address(0), "PAYE: zero treasury");
 
         // OZ v4 Ownable defaults owner to msg.sender (deployer).
@@ -171,15 +161,11 @@ contract PAYEToken is OFT, Ownable2Step {
      *      two-step: the proposed new owner must explicitly accept before the transfer
      *      is finalised, protecting against accidental key-loss.
      */
-    function transferOwnership(
-        address newOwner
-    ) public override(Ownable, Ownable2Step) onlyOwner {
+    function transferOwnership(address newOwner) public override(Ownable, Ownable2Step) onlyOwner {
         Ownable2Step.transferOwnership(newOwner);
     }
 
-    function _transferOwnership(
-        address newOwner
-    ) internal override(Ownable, Ownable2Step) {
+    function _transferOwnership(address newOwner) internal override(Ownable, Ownable2Step) {
         Ownable2Step._transferOwnership(newOwner);
     }
 
@@ -192,10 +178,7 @@ contract PAYEToken is OFT, Ownable2Step {
      *         developer toggle.
      */
     // slither-disable-next-line naming-convention
-    function setPeer(
-        uint32 eid,
-        bytes32 peer
-    ) public override onlyOwnerOrDeveloper {
+    function setPeer(uint32 eid, bytes32 peer) public override onlyOwnerOrDeveloper {
         _setPeer(eid, peer);
     }
 
