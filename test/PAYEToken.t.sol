@@ -112,8 +112,8 @@ contract PAYETokenTest is Test {
     }
 
     function test_isHomeChain_flag() public view {
-        assertTrue(homeToken.IS_HOME_CHAIN());
-        assertFalse(remoteToken.IS_HOME_CHAIN());
+        assertTrue(homeToken.isHomeChain());
+        assertFalse(remoteToken.isHomeChain());
     }
 
     // ── Ownership ──────────────────────────────────────────────────────────────

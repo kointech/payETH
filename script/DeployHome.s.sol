@@ -68,7 +68,7 @@ contract DeployHome is Script {
         console2.log("Treasury  :", treasury);
         console2.log("Supply    :", TOTAL_SUPPLY);
         console2.log("Owner     :", paye.owner());
-        console2.log("isHomeChain:", paye.IS_HOME_CHAIN());
+        console2.log("isHomeChain:", paye.isHomeChain());
         console2.log("Decimals  :", paye.decimals());
     }
 }

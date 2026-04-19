@@ -34,7 +34,7 @@
 //   Remote chains (Linea, …) — deploys with initialSupply = 0  (supply arrives via bridge)
 //   All deployments must be wired together with setPeer() before any bridging
 
-pragma solidity 0.8.22;
+pragma solidity 0.8.28;
 
 import {OFT} from "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/OFT.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -66,7 +66,8 @@ contract PAYEToken is OFT, Ownable2Step {
     // ─── Immutables ───────────────────────────────────────────────────────────
 
     /// @notice True on the Ethereum home-chain deployment where the full supply was minted.
-    bool public immutable IS_HOME_CHAIN;
+    // slither-disable-next-line naming-convention
+    bool public immutable isHomeChain;
 
     // ─── State ────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ contract PAYEToken is OFT, Ownable2Step {
     // ─── Events ───────────────────────────────────────────────────────────────
 
     /// @dev Emitted once at construction when the full supply is minted.
-    event SupplyMinted(address indexed treasury, uint256 amount);
+    event SupplyMinted(address indexed treasury, uint256 indexed amount);
 
     /// @dev Emitted when the developer address is changed.
     event DeveloperChanged(
@@ -88,7 +89,7 @@ contract PAYEToken is OFT, Ownable2Step {
     );
 
     /// @dev Emitted when the developer role is enabled or disabled.
-    event DeveloperToggled(bool enabled);
+    event DeveloperToggled(bool indexed enabled);
 
     // ─── Errors ───────────────────────────────────────────────────────────────
 
@@ -134,7 +135,7 @@ contract PAYEToken is OFT, Ownable2Step {
         emit DeveloperChanged(address(0), msg.sender);
         emit DeveloperToggled(true);
 
-        IS_HOME_CHAIN = (initialSupply > 0);
+        isHomeChain = (initialSupply > 0);
 
         if (initialSupply > 0) {
             _mint(treasury, initialSupply);
@@ -190,11 +191,12 @@ contract PAYEToken is OFT, Ownable2Step {
      *         to the owner.  The owner can always call this regardless of the
      *         developer toggle.
      */
+    // slither-disable-next-line naming-convention
     function setPeer(
-        uint32 _eid,
-        bytes32 _peer
+        uint32 eid,
+        bytes32 peer
     ) public override onlyOwnerOrDeveloper {
-        _setPeer(_eid, _peer);
+        _setPeer(eid, peer);
     }
 
     // ─── Developer management (owner-only) ────────────────────────────────────
@@ -205,8 +207,14 @@ contract PAYEToken is OFT, Ownable2Step {
      */
     function setDeveloper(address newDeveloper) external onlyOwner {
         address previous = developer;
-        developer = newDeveloper;
+        // slither-disable-next-line missing-zero-check
+        developer = newDeveloper; // address(0) intentionally removes the developer
         emit DeveloperChanged(previous, newDeveloper);
+        // Automatically disable the role when the developer is removed (address(0))
+        if (newDeveloper == address(0) && developerEnabled) {
+            developerEnabled = false;
+            emit DeveloperToggled(false);
+        }
     }
 
     /**

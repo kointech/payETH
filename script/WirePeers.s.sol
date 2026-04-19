@@ -38,13 +38,17 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  *         Required environment variables:
  *           LOCAL_PAYE_ADDRESS   — address of PAYEToken on THIS chain
  *           REMOTE_EID           — LayerZero endpoint ID of the PEER chain
- *           REMOTE_PAYE_ADDRESS  — address of PAYEToken on the PEER chain
+ *           REMOTE_PAYE_ADDRESS  — address of PAYEToken on the PEER chain (EVM chains only)
+ *           REMOTE_PEER_BYTES32  — raw bytes32 peer (non-EVM chains, e.g. Solana).
+ *                                  When set, takes precedence over REMOTE_PAYE_ADDRESS.
  *
  *         LayerZero Endpoint IDs (EIDs):
  *           Ethereum Mainnet : 30101
  *           Linea Mainnet    : 30183
+ *           Solana Mainnet   : 30168
  *           Ethereum Sepolia : 40161
- *           Linea Sepolia    : 40287
+ *           Base Sepolia     : 40287
+ *           Solana Devnet    : 40168
  *
  * Usage (Ethereum side):
  *   forge script script/WirePeers.s.sol \
@@ -62,14 +66,21 @@ contract WirePeers is Script {
     function run() external {
         address localPaye = vm.envAddress("LOCAL_PAYE_ADDRESS");
         uint32 remoteEid = uint32(vm.envUint("REMOTE_EID"));
-        address remotePaye = vm.envAddress("REMOTE_PAYE_ADDRESS");
 
         require(localPaye != address(0), "WirePeers: zero local");
-        require(remotePaye != address(0), "WirePeers: zero remote");
         require(remoteEid != 0, "WirePeers: zero eid");
 
-        // LayerZero peers are stored as bytes32 (accommodates non-EVM addresses like Solana)
-        bytes32 peerBytes32 = bytes32(uint256(uint160(remotePaye)));
+        // Prefer REMOTE_PEER_BYTES32 for non-EVM chains (e.g. Solana).
+        // Fall back to REMOTE_PAYE_ADDRESS (EVM address → bytes32) otherwise.
+        bytes32 peerBytes32;
+        bytes memory rawBytes32 = vm.envOr("REMOTE_PEER_BYTES32", bytes(""));
+        if (rawBytes32.length > 0) {
+            peerBytes32 = vm.envBytes32("REMOTE_PEER_BYTES32");
+        } else {
+            address remotePaye = vm.envAddress("REMOTE_PAYE_ADDRESS");
+            require(remotePaye != address(0), "WirePeers: zero remote");
+            peerBytes32 = bytes32(uint256(uint160(remotePaye)));
+        }
 
         vm.startBroadcast();
 
@@ -80,7 +91,6 @@ contract WirePeers is Script {
         console2.log("=== WirePeers ===");
         console2.log("Local PAYE  :", localPaye);
         console2.log("Remote EID  :", remoteEid);
-        console2.log("Remote PAYE :", remotePaye);
         console2.log("Peer bytes32:", vm.toString(peerBytes32));
         console2.log("Peer set successfully.");
     }
