@@ -34,7 +34,7 @@
 //   Remote chains (Linea, …) — deploys with initialSupply = 0  (supply arrives via bridge)
 //   All deployments must be wired together with setPeer() before any bridging
 
-pragma solidity 0.8.28;
+pragma solidity 0.8.30;
 
 import {OFT} from "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/OFT.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -77,26 +77,39 @@ contract PAYEToken is OFT, Ownable2Step {
     /// @notice Whether the developer role is currently active.
     bool public developerEnabled;
 
+    /// @notice Proposed next developer address; must call acceptDeveloper() to take effect.
+    address public pendingDeveloper;
+
     // ─── Events ───────────────────────────────────────────────────────────────
 
     /// @dev Emitted once at construction when the full supply is minted.
     event SupplyMinted(address indexed treasury, uint256 indexed amount);
 
     /// @dev Emitted when the developer address is changed.
-    event DeveloperChanged(address indexed previousDeveloper, address indexed newDeveloper);
+    event DeveloperChanged(
+        address indexed previousDeveloper,
+        address indexed newDeveloper
+    );
 
     /// @dev Emitted when the developer role is enabled or disabled.
     event DeveloperToggled(bool indexed enabled);
 
+    /// @dev Emitted when a pending developer change is proposed via setDeveloper().
+    event DeveloperProposed(address indexed proposedDeveloper);
+
     // ─── Errors ───────────────────────────────────────────────────────────────
 
     error NotOwnerOrDeveloper();
+    error NotPendingDeveloper();
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
 
     /// @dev Allows owner OR (enabled developer) to call the function.
     modifier onlyOwnerOrDeveloper() {
-        if (msg.sender != owner() && !(developerEnabled && msg.sender == developer)) {
+        if (
+            msg.sender != owner() &&
+            !(developerEnabled && msg.sender == developer)
+        ) {
             revert NotOwnerOrDeveloper();
         }
         _;
@@ -111,7 +124,11 @@ contract PAYEToken is OFT, Ownable2Step {
      * @param initialSupply Amount of PAYE (in smallest units, i.e. × 10**4) to mint
      *                     at deployment.  Must be 0 on remote chains.
      */
-    constructor(address lzEndpoint, address treasury, uint256 initialSupply) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
+    constructor(
+        address lzEndpoint,
+        address treasury,
+        uint256 initialSupply
+    ) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
         require(treasury != address(0), "PAYE: zero treasury");
 
         // OZ v4 Ownable defaults owner to msg.sender (deployer).
@@ -161,11 +178,15 @@ contract PAYEToken is OFT, Ownable2Step {
      *      two-step: the proposed new owner must explicitly accept before the transfer
      *      is finalised, protecting against accidental key-loss.
      */
-    function transferOwnership(address newOwner) public override(Ownable, Ownable2Step) onlyOwner {
+    function transferOwnership(
+        address newOwner
+    ) public override(Ownable, Ownable2Step) onlyOwner {
         Ownable2Step.transferOwnership(newOwner);
     }
 
-    function _transferOwnership(address newOwner) internal override(Ownable, Ownable2Step) {
+    function _transferOwnership(
+        address newOwner
+    ) internal override(Ownable, Ownable2Step) {
         Ownable2Step._transferOwnership(newOwner);
     }
 
@@ -178,26 +199,50 @@ contract PAYEToken is OFT, Ownable2Step {
      *         developer toggle.
      */
     // slither-disable-next-line naming-convention
-    function setPeer(uint32 eid, bytes32 peer) public override onlyOwnerOrDeveloper {
+    function setPeer(
+        uint32 eid,
+        bytes32 peer
+    ) public override onlyOwnerOrDeveloper {
         _setPeer(eid, peer);
     }
 
     // ─── Developer management (owner-only) ────────────────────────────────────
 
     /**
-     * @notice Sets a new developer address.
-     * @param  newDeveloper The address to authorise.  Use address(0) to remove.
+     * @notice Proposes a new developer address (two-step).
+     * @dev    The proposed address must call acceptDeveloper() to activate the role.
+     *         Passing address(0) immediately removes the developer without a confirmation
+     *         step — reducing privilege is always safe without a second transaction.
+     * @param  newDeveloper The address to propose.  Use address(0) for immediate removal.
      */
     function setDeveloper(address newDeveloper) external onlyOwner {
-        address previous = developer;
-        // slither-disable-next-line missing-zero-check
-        developer = newDeveloper; // address(0) intentionally removes the developer
-        emit DeveloperChanged(previous, newDeveloper);
-        // Automatically disable the role when the developer is removed (address(0))
-        if (newDeveloper == address(0) && developerEnabled) {
-            developerEnabled = false;
-            emit DeveloperToggled(false);
+        if (newDeveloper == address(0)) {
+            // Immediate removal — reducing privilege requires no acceptance step.
+            address previous = developer;
+            developer = address(0);
+            pendingDeveloper = address(0);
+            emit DeveloperChanged(previous, address(0));
+            if (developerEnabled) {
+                developerEnabled = false;
+                emit DeveloperToggled(false);
+            }
+        } else {
+            pendingDeveloper = newDeveloper;
+            emit DeveloperProposed(newDeveloper);
         }
+    }
+
+    /**
+     * @notice Completes the two-step developer transfer.
+     * @dev    Must be called by the address set via setDeveloper().  Until this is
+     *         called the role remains with the previous developer.
+     */
+    function acceptDeveloper() external {
+        if (msg.sender != pendingDeveloper) revert NotPendingDeveloper();
+        address previous = developer;
+        developer = pendingDeveloper;
+        pendingDeveloper = address(0);
+        emit DeveloperChanged(previous, developer);
     }
 
     /**

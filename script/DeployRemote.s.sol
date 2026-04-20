@@ -22,7 +22,7 @@
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
 // ─────────────────────────────────────────────────────────────────────────────
-pragma solidity 0.8.22;
+pragma solidity 0.8.30;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {PAYEToken} from "../src/PAYEToken.sol";
@@ -70,6 +70,8 @@ contract DeployRemote is Script {
         console2.log("Treasury   :", treasury);
         console2.log("isHomeChain:", paye.isHomeChain());
         console2.log("Decimals   :", paye.decimals());
-        console2.log("NOTE: Run WirePeers.s.sol to link with home-chain deployment.");
+        console2.log(
+            "NOTE: Run WirePeers.s.sol to link with home-chain deployment."
+        );
     }
 }

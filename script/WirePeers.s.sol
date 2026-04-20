@@ -22,7 +22,7 @@
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
 // ─────────────────────────────────────────────────────────────────────────────
-pragma solidity 0.8.22;
+pragma solidity 0.8.30;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {PAYEToken} from "../src/PAYEToken.sol";

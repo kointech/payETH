@@ -22,7 +22,7 @@
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
 // ─────────────────────────────────────────────────────────────────────────────
-pragma solidity 0.8.22;
+pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {PAYEToken} from "../src/PAYEToken.sol";
@@ -70,7 +70,11 @@ contract PAYETokenTest is Test {
 
     function setUp() public {
         endpoint = new MockEndpointV2();
-        homeToken = new PAYEToken(address(endpoint), treasury, TOTAL_SUPPLY_UNITS);
+        homeToken = new PAYEToken(
+            address(endpoint),
+            treasury,
+            TOTAL_SUPPLY_UNITS
+        );
         remoteToken = new PAYEToken(address(endpoint), treasury, 0);
     }
 
@@ -152,8 +156,13 @@ contract PAYETokenTest is Test {
         // bytes4(keccak256("mint(address,uint256)")) = 0x40c10f19
         bytes4 mintSelector = bytes4(keccak256("mint(address,uint256)"));
         // The contract should not expose this function; calling it must revert.
-        (bool success,) = address(homeToken).staticcall(abi.encodeWithSelector(mintSelector, alice, 1));
-        assertFalse(success, "PAYEToken must not expose a public mint function");
+        (bool success, ) = address(homeToken).staticcall(
+            abi.encodeWithSelector(mintSelector, alice, 1)
+        );
+        assertFalse(
+            success,
+            "PAYEToken must not expose a public mint function"
+        );
     }
 
     function test_supplyIsFixed_afterDeploy() public view {
@@ -211,9 +220,17 @@ contract PAYETokenTest is Test {
         vm.prank(attacker);
         homeToken.setDeveloper(dev);
 
+        // Two-step: setDeveloper only queues the change.
         vm.prank(treasury);
         homeToken.setDeveloper(dev);
+        assertEq(homeToken.pendingDeveloper(), dev);
+        assertEq(homeToken.developer(), address(this)); // still the old developer
+
+        // Pending address must accept before the role is granted.
+        vm.prank(dev);
+        homeToken.acceptDeveloper();
         assertEq(homeToken.developer(), dev);
+        assertEq(homeToken.pendingDeveloper(), address(0));
     }
 
     function test_enableDeveloper_onlyOwner() public {
@@ -243,12 +260,14 @@ contract PAYETokenTest is Test {
         uint32 remoteEid = 30183;
         bytes32 remotePeer = bytes32(uint256(uint160(address(remoteToken))));
 
-        // Deployer (address(this)) is the initial developer and already enabled.
-        // Owner changes developer to dev and disables first.
-        vm.startPrank(treasury);
+        // Two-step: propose then accept.
+        vm.prank(treasury);
         homeToken.setDeveloper(dev);
+        vm.prank(dev);
+        homeToken.acceptDeveloper();
+
+        vm.prank(treasury);
         homeToken.disableDeveloper();
-        vm.stopPrank();
 
         // Developer cannot set peer while disabled
         vm.expectRevert(PAYEToken.NotOwnerOrDeveloper.selector);
@@ -269,10 +288,14 @@ contract PAYETokenTest is Test {
         uint32 remoteEid = 30183;
         bytes32 remotePeer = bytes32(uint256(uint160(address(remoteToken))));
 
-        vm.startPrank(treasury);
+        // Two-step: propose then accept.
+        vm.prank(treasury);
         homeToken.setDeveloper(dev);
+        vm.prank(dev);
+        homeToken.acceptDeveloper();
+
+        vm.prank(treasury);
         homeToken.enableDeveloper();
-        vm.stopPrank();
 
         // Developer can set peer
         vm.prank(dev);
@@ -291,11 +314,20 @@ contract PAYETokenTest is Test {
     function test_developer_changeTo_newAddress() public {
         address dev2 = makeAddr("developer2");
 
-        vm.startPrank(treasury);
+        // Promote dev via two-step.
+        vm.prank(treasury);
         homeToken.setDeveloper(dev);
+        vm.prank(dev);
+        homeToken.acceptDeveloper();
+
+        vm.prank(treasury);
         homeToken.enableDeveloper();
+
+        // Replace with dev2 via two-step.
+        vm.prank(treasury);
         homeToken.setDeveloper(dev2);
-        vm.stopPrank();
+        vm.prank(dev2);
+        homeToken.acceptDeveloper();
 
         assertEq(homeToken.developer(), dev2);
 
@@ -307,6 +339,67 @@ contract PAYETokenTest is Test {
         // New developer works
         vm.prank(dev2);
         homeToken.setPeer(30183, bytes32(uint256(1)));
+    }
+
+    // ── Two-step developer transfer ────────────────────────────────────────────
+
+    function test_setDeveloper_setsOnlyPending() public {
+        vm.prank(treasury);
+        homeToken.setDeveloper(dev);
+
+        // Role not yet transferred — only pending is updated.
+        assertEq(homeToken.pendingDeveloper(), dev);
+        assertEq(homeToken.developer(), address(this));
+    }
+
+    function test_acceptDeveloper_onlyPendingCanAccept() public {
+        vm.prank(treasury);
+        homeToken.setDeveloper(dev);
+
+        vm.expectRevert(PAYEToken.NotPendingDeveloper.selector);
+        vm.prank(attacker);
+        homeToken.acceptDeveloper();
+
+        // Correct pending address can accept.
+        vm.prank(dev);
+        homeToken.acceptDeveloper();
+        assertEq(homeToken.developer(), dev);
+    }
+
+    function test_setDeveloper_zeroAddress_immediateRemoval() public {
+        // Setup: make dev the active developer.
+        vm.prank(treasury);
+        homeToken.setDeveloper(dev);
+        vm.prank(dev);
+        homeToken.acceptDeveloper();
+
+        vm.prank(treasury);
+        homeToken.enableDeveloper();
+
+        // Removing with address(0) is immediate — no accept step required.
+        vm.prank(treasury);
+        homeToken.setDeveloper(address(0));
+
+        assertEq(homeToken.developer(), address(0));
+        assertEq(homeToken.pendingDeveloper(), address(0));
+        assertFalse(homeToken.developerEnabled());
+    }
+
+    function test_setDeveloper_overwritesPending() public {
+        address dev2 = makeAddr("developer2");
+
+        vm.prank(treasury);
+        homeToken.setDeveloper(dev);
+
+        // Owner can overwrite the pending address before it is accepted.
+        vm.prank(treasury);
+        homeToken.setDeveloper(dev2);
+        assertEq(homeToken.pendingDeveloper(), dev2);
+
+        // Original dev can no longer accept.
+        vm.expectRevert(PAYEToken.NotPendingDeveloper.selector);
+        vm.prank(dev);
+        homeToken.acceptDeveloper();
     }
 
     // ── Constructor guards ─────────────────────────────────────────────────────
