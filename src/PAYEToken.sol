@@ -21,6 +21,7 @@
 //
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
+// Security researchers may read and test this code for bug-finding purposes only.
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // SECURITY NOTICE:
@@ -39,6 +40,7 @@ pragma solidity 0.8.30;
 import {OFT} from "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/OFT.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title  PAYEToken
@@ -47,19 +49,19 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
  *         It is a LayerZero OFT (Omnichain Fungible Token) with a fixed total supply
  *         of 125,000,000 PAYE distributed across all connected chains.
  *
- * @dev Decimals are set to 4 (not the ERC-20 default of 18).
- *      sharedDecimals() is overridden to 4 so the inter-chain decimal conversion
+ * @dev Decimals are set to 18 (the ERC-20 standard default).
+ *      sharedDecimals() is overridden to 18 so the inter-chain decimal conversion
  *      rate is exactly 1 (no dust loss on any EVM chain).
  *
  *      Deployment pattern:
- *        • Home chain   → pass initialSupply = 125_000_000 * 10**4
+ *        • Home chain   → pass initialSupply = 125_000_000 * 10**18
  *        • Remote chains → pass initialSupply = 0
  */
 contract PAYEToken is OFT, Ownable2Step {
     // ─── Constants ────────────────────────────────────────────────────────────
 
-    uint8 private constant _DECIMALS = 4;
-    uint8 private constant _SHARED_DECIMALS = 4;
+    uint8 private constant _DECIMALS = 18;
+    uint8 private constant _SHARED_DECIMALS = 18;
     string private constant _NAME = "PayETH";
     string private constant _SYMBOL = "PAYE";
 
@@ -97,10 +99,21 @@ contract PAYEToken is OFT, Ownable2Step {
     /// @dev Emitted when a pending developer change is proposed via setDeveloper().
     event DeveloperProposed(address indexed proposedDeveloper);
 
+    /// @dev Emitted when ETH is rescued from the contract.
+    event ETHRescued(address indexed to, uint256 amount);
+
+    /// @dev Emitted when ERC-20 tokens are rescued from the contract.
+    event ERC20Rescued(
+        address indexed token,
+        address indexed to,
+        uint256 amount
+    );
+
     // ─── Errors ───────────────────────────────────────────────────────────────
 
     error NotOwnerOrDeveloper();
     error NotPendingDeveloper();
+    error TransferFailed();
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
 
@@ -118,16 +131,20 @@ contract PAYEToken is OFT, Ownable2Step {
     // ─── Constructor ─────────────────────────────────────────────────────────
 
     /**
-     * @param lzEndpoint   Address of the LayerZero EndpointV2 on this chain.
-     * @param treasury     Address that receives the initial supply (Koinon wallet).
-     *                     Also becomes the initial owner / delegate.
-     * @param initialSupply Amount of PAYE (in smallest units, i.e. × 10**4) to mint
-     *                     at deployment.  Must be 0 on remote chains.
+     * @param lzEndpoint    Address of the LayerZero EndpointV2 on this chain.
+     * @param treasury      Address that receives the initial supply (Koinon wallet).
+     *                      Also becomes the initial owner / delegate.
+     * @param initialSupply Amount of PAYE (in smallest units, i.e. × 10**18) to mint
+     *                      at deployment.  Must be 0 on remote chains.
+     * @param _isHomeChain  Must be `true` iff this is the Ethereum home-chain deployment.
+     *                      Explicitly provided to prevent silent mis-deployment when a
+     *                      non-zero initialSupply is passed to a remote chain by mistake.
      */
     constructor(
         address lzEndpoint,
         address treasury,
-        uint256 initialSupply
+        uint256 initialSupply,
+        bool _isHomeChain
     ) OFT(_NAME, _SYMBOL, lzEndpoint, treasury) {
         require(treasury != address(0), "PAYE: zero treasury");
 
@@ -142,7 +159,11 @@ contract PAYEToken is OFT, Ownable2Step {
         emit DeveloperChanged(address(0), msg.sender);
         emit DeveloperToggled(true);
 
-        isHomeChain = (initialSupply > 0);
+        isHomeChain = _isHomeChain;
+        require(
+            _isHomeChain == (initialSupply > 0),
+            "PAYE: flag/supply mismatch"
+        );
 
         if (initialSupply > 0) {
             _mint(treasury, initialSupply);
@@ -154,7 +175,7 @@ contract PAYEToken is OFT, Ownable2Step {
 
     /**
      * @notice Returns the number of decimal places used by PAYE.
-     * @dev    Overrides the ERC-20 default of 18.  Must equal or exceed sharedDecimals().
+     * @dev    Standard ERC-20 value of 18.  Must equal or exceed sharedDecimals().
      */
     function decimals() public pure override returns (uint8) {
         return _DECIMALS;
@@ -259,5 +280,50 @@ contract PAYEToken is OFT, Ownable2Step {
     function disableDeveloper() external onlyOwner {
         developerEnabled = false;
         emit DeveloperToggled(false);
+    }
+
+    // ─── Recovery (owner-only) ─────────────────────────────────────────────────
+
+    /**
+     * @notice Explicit rejection of plain ETH transfers.
+     * @dev    Makes the contract's intent clear: ETH sent here is not accepted.
+     *         Any accidental send will revert with a descriptive error rather than
+     *         silently succeeding (which would lock the funds forever).
+     */
+    receive() external payable {
+        revert("PAYE: ETH not accepted");
+    }
+
+    /**
+     * @notice Rescues ETH that somehow arrived at the contract address
+     *         (e.g. via selfdestruct or coinbase assignment).
+     * @param  to     Recipient address.
+     * @param  amount Amount of ETH in wei to send.
+     */
+    function rescueETH(address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "PAYE: zero recipient");
+        (bool ok, ) = to.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+        emit ETHRescued(to, amount);
+    }
+
+    /**
+     * @notice Rescues ERC-20 tokens accidentally sent to this contract.
+     * @dev    Deliberately blocks recovery of the PAYE token itself to prevent
+     *         the owner from extracting tokens that belong to bridge liquidity.
+     * @param  token  Address of the ERC-20 token to rescue.
+     * @param  to     Recipient address.
+     * @param  amount Amount of tokens (in that token's smallest unit) to transfer.
+     */
+    function rescueERC20(
+        address token,
+        address to,
+        uint256 amount
+    ) external onlyOwner {
+        require(token != address(this), "PAYE: cannot rescue PAYE");
+        require(to != address(0), "PAYE: zero recipient");
+        bool ok = IERC20(token).transfer(to, amount);
+        if (!ok) revert TransferFailed();
+        emit ERC20Rescued(token, to, amount);
     }
 }

@@ -21,6 +21,7 @@
 //
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
+// Security researchers may read and test this code for bug-finding purposes only.
 // ─────────────────────────────────────────────────────────────────────────────
 pragma solidity 0.8.30;
 
@@ -84,7 +85,7 @@ contract WirePeers is Script {
 
         vm.startBroadcast();
 
-        PAYEToken(localPaye).setPeer(remoteEid, peerBytes32);
+        PAYEToken(payable(localPaye)).setPeer(remoteEid, peerBytes32);
 
         vm.stopBroadcast();
 

@@ -21,6 +21,7 @@
 //
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
+// Security researchers may read and test this code for bug-finding purposes only.
 // ─────────────────────────────────────────────────────────────────────────────
 pragma solidity 0.8.30;
 
@@ -61,7 +62,7 @@ contract DeployRemote is Script {
         vm.startBroadcast();
 
         // initialSupply = 0 on remote chains — supply is bridged in, never freshly minted
-        PAYEToken paye = new PAYEToken(lzEndpoint, treasury, 0);
+        PAYEToken paye = new PAYEToken(lzEndpoint, treasury, 0, false);
 
         vm.stopBroadcast();
 

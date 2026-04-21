@@ -21,6 +21,7 @@
 //
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
+// Security researchers may read and test this code for bug-finding purposes only.
 // ─────────────────────────────────────────────────────────────────────────────
 pragma solidity 0.8.30;
 
@@ -48,7 +49,7 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  */
 contract DeployHome is Script {
     /// 125,000,000 tokens with 4 decimal places = 1,250,000,000,000 base units
-    uint256 public constant TOTAL_SUPPLY = 125_000_000 * 10 ** 4;
+    uint256 public constant TOTAL_SUPPLY = 125_000_000 * 10 ** 18;
 
     function run() external {
         address treasury = vm.envAddress("TREASURY_ADDRESS");
@@ -59,7 +60,12 @@ contract DeployHome is Script {
 
         vm.startBroadcast();
 
-        PAYEToken paye = new PAYEToken(lzEndpoint, treasury, TOTAL_SUPPLY);
+        PAYEToken paye = new PAYEToken(
+            lzEndpoint,
+            treasury,
+            TOTAL_SUPPLY,
+            true
+        );
 
         vm.stopBroadcast();
 

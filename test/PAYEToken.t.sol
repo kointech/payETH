@@ -21,6 +21,7 @@
 //
 // No licence to reproduce, distribute, or create derivative works is granted
 // without prior written consent of the beneficial owner.
+// Security researchers may read and test this code for bug-finding purposes only.
 // ─────────────────────────────────────────────────────────────────────────────
 pragma solidity 0.8.30;
 
@@ -54,7 +55,7 @@ contract MockEndpointV2 {
 contract PAYETokenTest is Test {
     // ── Constants ──────────────────────────────────────────────────────────────
 
-    uint256 constant TOTAL_SUPPLY_UNITS = 125_000_000 * 10 ** 4; // 1_250_000_000_000
+    uint256 constant TOTAL_SUPPLY_UNITS = 125_000_000 * 10 ** 18; // 125_000_000e18
 
     address treasury = makeAddr("treasury");
     address alice = makeAddr("alice");
@@ -73,9 +74,10 @@ contract PAYETokenTest is Test {
         homeToken = new PAYEToken(
             address(endpoint),
             treasury,
-            TOTAL_SUPPLY_UNITS
+            TOTAL_SUPPLY_UNITS,
+            true
         );
-        remoteToken = new PAYEToken(address(endpoint), treasury, 0);
+        remoteToken = new PAYEToken(address(endpoint), treasury, 0, false);
     }
 
     // ── Metadata ───────────────────────────────────────────────────────────────
@@ -89,11 +91,11 @@ contract PAYETokenTest is Test {
     }
 
     function test_decimals() public view {
-        assertEq(homeToken.decimals(), 4);
+        assertEq(homeToken.decimals(), 18);
     }
 
     function test_sharedDecimals() public view {
-        assertEq(homeToken.sharedDecimals(), 4);
+        assertEq(homeToken.sharedDecimals(), 18);
     }
 
     // ── Supply ─────────────────────────────────────────────────────────────────
@@ -173,7 +175,7 @@ contract PAYETokenTest is Test {
     // ── Transfers ──────────────────────────────────────────────────────────────
 
     function test_transfer() public {
-        uint256 amount = 1_000 * 10 ** 4; // 1,000 PAYE
+        uint256 amount = 1_000 * 10 ** 18; // 1,000 PAYE
 
         vm.prank(treasury);
         assertTrue(homeToken.transfer(alice, amount));
@@ -408,7 +410,17 @@ contract PAYETokenTest is Test {
         // OFT passes treasury as the LZ delegate; OAppCore reverts with InvalidDelegate()
         // before our require() runs — but the zero-address is still rejected at construction.
         vm.expectRevert();
-        new PAYEToken(address(endpoint), address(0), TOTAL_SUPPLY_UNITS);
+        new PAYEToken(address(endpoint), address(0), TOTAL_SUPPLY_UNITS, true);
+    }
+
+    function test_constructor_revertsOnFlagSupplyMismatch() public {
+        // isHomeChain=true with zero supply must revert.
+        vm.expectRevert(bytes("PAYE: flag/supply mismatch"));
+        new PAYEToken(address(endpoint), treasury, 0, true);
+
+        // isHomeChain=false with non-zero supply must revert.
+        vm.expectRevert(bytes("PAYE: flag/supply mismatch"));
+        new PAYEToken(address(endpoint), treasury, TOTAL_SUPPLY_UNITS, false);
     }
 
     // ── Fuzz ───────────────────────────────────────────────────────────────────
@@ -419,5 +431,57 @@ contract PAYETokenTest is Test {
         vm.prank(treasury);
         assertTrue(homeToken.transfer(alice, amt));
         assertEq(homeToken.totalSupply(), TOTAL_SUPPLY_UNITS);
+    }
+
+    // ── Recovery ───────────────────────────────────────────────────────────────
+
+    function test_receive_revertsOnETHTransfer() public {
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        (bool success, ) = address(homeToken).call{value: 1 ether}("");
+        assertFalse(success, "ETH transfer should have reverted");
+    }
+
+    function test_rescueETH_onlyOwner() public {
+        // Fund the contract directly (simulating selfdestruct / coinbase credit).
+        vm.deal(address(homeToken), 0.5 ether);
+
+        // Non-owner cannot rescue.
+        vm.expectRevert();
+        vm.prank(attacker);
+        homeToken.rescueETH(attacker, 0.5 ether);
+
+        // Owner can rescue.
+        uint256 before = treasury.balance;
+        vm.prank(treasury);
+        homeToken.rescueETH(treasury, 0.5 ether);
+        assertEq(treasury.balance, before + 0.5 ether);
+        assertEq(address(homeToken).balance, 0);
+    }
+
+    function test_rescueERC20_onlyOwner() public {
+        // Deploy a dummy ERC-20 (use a second remoteToken instance as a stand-in).
+        PAYEToken dummy = new PAYEToken(address(endpoint), alice, 1_000, true);
+
+        // Send some dummy tokens to homeToken.
+        vm.prank(alice);
+        dummy.transfer(address(homeToken), 500);
+
+        // Non-owner cannot rescue.
+        vm.expectRevert();
+        vm.prank(attacker);
+        homeToken.rescueERC20(address(dummy), treasury, 500);
+
+        // Owner can rescue.
+        vm.prank(treasury);
+        homeToken.rescueERC20(address(dummy), treasury, 500);
+        assertEq(dummy.balanceOf(treasury), 500);
+        assertEq(dummy.balanceOf(address(homeToken)), 0);
+    }
+
+    function test_rescueERC20_blocksOwnToken() public {
+        vm.prank(treasury);
+        vm.expectRevert(bytes("PAYE: cannot rescue PAYE"));
+        homeToken.rescueERC20(address(homeToken), treasury, 1);
     }
 }
