@@ -29,50 +29,56 @@ import {Script, console2} from "forge-std/Script.sol";
 import {PAYEToken} from "../src/PAYEToken.sol";
 
 /**
- * @title  DeployRemote
- * @notice Deploys PAYEToken on a REMOTE chain (e.g. Linea Mainnet).
- *         No tokens are minted here; supply arrives exclusively via the LayerZero bridge.
+ * @title  Deploy
+ * @notice Unified deployment script for PAYEToken on any chain.
  *
- * @dev    Required environment variables:
- *           TREASURY_ADDRESS       — Koinon-controlled wallet (becomes owner/delegate)
- *           LZ_ENDPOINT_ADDRESS    — LayerZero EndpointV2 address on this chain
- *                                    Linea Mainnet:  0x1a44076050125825900e736c501f859c50fE728c
- *                                    Linea Sepolia:  0x6EDCE65403992e310A62460808c4b910D972f10f
- *
- * @dev    After deployment, run WirePeers.s.sol on BOTH chains to link this contract
- *         with the home-chain deployment before any bridging can occur.
+ * @dev    Required environment variables (set in .env):
+ *           TREASURY_ADDRESS    — Koinon-controlled wallet (receives supply on home, owner everywhere)
+ *           LZ_ENDPOINT_ADDRESS — LayerZero EndpointV2 address on the target chain
+ *           IS_HOME             — "true" for the home chain (mints full supply), "false" for remote chains
  *
  * Usage:
- *   forge script script/DeployRemote.s.sol \
- *     --rpc-url $LINEA_RPC_URL \
- *     --account deployer \
- *     --broadcast \
- *     --verify \
- *     --verifier blockscout \
- *     --verifier-url https://api.lineascan.build/api
+ *   # Home chain — Linea (mints 125 M PAYE to treasury):
+ *   IS_HOME=true  forge script script/Deploy.s.sol --rpc-url $RPC_URL --account deployer --broadcast --verify --etherscan-api-key $VERIFY_KEY
+ *
+ *   # Remote chain — Base, Solana, etc. (no mint; supply arrives via bridge):
+ *   IS_HOME=false forge script script/Deploy.s.sol --rpc-url $RPC_URL --account deployer --broadcast --verify --etherscan-api-key $VERIFY_KEY
  */
-contract DeployRemote is Script {
+contract Deploy is Script {
+    /// 125,000,000 tokens with 18 decimal places
+    uint256 public constant TOTAL_SUPPLY = 125_000_000 * 10 ** 18;
+
     function run() external {
         address treasury = vm.envAddress("TREASURY_ADDRESS");
         address lzEndpoint = vm.envAddress("LZ_ENDPOINT_ADDRESS");
+        bool isHome = vm.envBool("IS_HOME");
 
-        require(treasury != address(0), "DeployRemote: zero treasury");
-        require(lzEndpoint != address(0), "DeployRemote: zero endpoint");
+        require(treasury != address(0), "Deploy: zero treasury");
+        require(lzEndpoint != address(0), "Deploy: zero endpoint");
+
+        uint256 initialSupply = isHome ? TOTAL_SUPPLY : 0;
 
         vm.startBroadcast();
 
-        // initialSupply = 0 on remote chains — supply is bridged in, never freshly minted
-        PAYEToken paye = new PAYEToken(lzEndpoint, treasury, 0, false);
+        PAYEToken paye = new PAYEToken(
+            lzEndpoint,
+            treasury,
+            initialSupply,
+            isHome
+        );
 
         vm.stopBroadcast();
 
-        console2.log("=== PAYE Remote Deployment ===");
+        console2.log("=== PAYE Deployment ===");
         console2.log("Contract   :", address(paye));
         console2.log("Treasury   :", treasury);
+        console2.log("Developer  :", msg.sender);
         console2.log("isHomeChain:", paye.isHomeChain());
+        if (isHome) console2.log("Supply     :", TOTAL_SUPPLY);
+        console2.log("Owner      :", paye.owner());
         console2.log("Decimals   :", paye.decimals());
         console2.log(
-            "NOTE: Run WirePeers.s.sol to link with home-chain deployment."
+            "NOTE: Run WirePeers.s.sol on both chains to link peers before bridging."
         );
     }
 }

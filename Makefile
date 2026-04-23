@@ -9,14 +9,11 @@
 ACCOUNT            ?= deployer
 FORGE_FLAGS        ?=
 
-# Chain RPC URLs (set in .env)
-HOME_RPC_URL       ?=
-REMOTE_RPC_URL     ?=
-LOCAL_RPC          ?=
+# Chain RPC URL (set in .env — one active line, others commented out)
+RPC_URL            ?=
 
-# Explorer API keys for contract verification (set in .env)
-HOME_VERIFY_KEY    ?=
-REMOTE_VERIFY_KEY  ?=
+# Explorer API key for contract verification (set in .env)
+VERIFY_KEY         ?=
 
 # ─── Build & Test ─────────────────────────────────────────────────────────────
 
@@ -33,52 +30,40 @@ clean:
 	forge clean
 
 # ─── Deploy ───────────────────────────────────────────────────────────────────
+# Set IS_HOME=true for the home chain (mints supply), IS_HOME=false for remote.
 
-deploy-home:
-	forge script script/DeployHome.s.sol \
-		--rpc-url $(HOME_RPC_URL) \
+IS_HOME            ?= false
+
+deploy:
+	forge script script/Deploy.s.sol \
+		--rpc-url $(RPC_URL) \
 		--account $(ACCOUNT) \
 		--broadcast \
 		--verify \
-		--etherscan-api-key $(HOME_VERIFY_KEY) \
-		$(FORGE_FLAGS)
-
-deploy-remote:
-	forge script script/DeployRemote.s.sol \
-		--rpc-url $(REMOTE_RPC_URL) \
-		--account $(ACCOUNT) \
-		--broadcast \
-		--verify \
-		--etherscan-api-key $(REMOTE_VERIFY_KEY) \
+		--etherscan-api-key $(VERIFY_KEY) \
 		$(FORGE_FLAGS)
 
 # ─── Wire Peers ───────────────────────────────────────────────────────────────
-# Set LOCAL_PAYE_ADDRESS, LOCAL_RPC, REMOTE_EID, and REMOTE_PEER_BYTES32
+# Set LOCAL_PAYE_ADDRESS, REMOTE_EID, and REMOTE_PEER_BYTES32
 # (non-EVM) or REMOTE_PAYE_ADDRESS (EVM) in .env, then run once per direction.
 
 wire:
 	forge script script/WirePeers.s.sol \
-		--rpc-url $(LOCAL_RPC) \
+		--rpc-url $(RPC_URL) \
 		--account $(ACCOUNT) \
 		--broadcast \
 		$(FORGE_FLAGS)
 
-# ─── Dry Runs (no broadcast) ─────────────────────────────────────────────────
+# ─── Dry Run (no broadcast) ──────────────────────────────────────────────────
 
-dry-deploy-home:
-	forge script script/DeployHome.s.sol \
-		--rpc-url $(HOME_RPC_URL) \
-		--account $(ACCOUNT) \
-		$(FORGE_FLAGS)
-
-dry-deploy-remote:
-	forge script script/DeployRemote.s.sol \
-		--rpc-url $(REMOTE_RPC_URL) \
+dry-deploy:
+	forge script script/Deploy.s.sol \
+		--rpc-url $(RPC_URL) \
 		--account $(ACCOUNT) \
 		$(FORGE_FLAGS)
 
 # ─── Bridge ───────────────────────────────────────────────────────────────────
-# Set LOCAL_PAYE_ADDRESS, LOCAL_RPC, and REMOTE_EID in .env, then:
+# Set LOCAL_PAYE_ADDRESS and REMOTE_EID in .env, then:
 #   make quote  [AMOUNT=10]                    — preview the LZ fee
 #   make bridge [AMOUNT=10] [BRIDGE_ACCOUNT=…] — send PAYE to REMOTE_EID
 # BRIDGE_ACCOUNT must be a cast wallet account that holds PAYE on LOCAL chain.
@@ -111,16 +96,16 @@ quote:
 		"quoteSend((uint32,bytes32,uint256,uint256,bytes,bytes,bytes),bool)((uint256,uint256))" \
 		"($(REMOTE_EID),$(RECIPIENT_B32),$(RAW_AMOUNT),$(RAW_AMOUNT),$(LZ_OPTIONS),0x,0x)" \
 		false \
-		--rpc-url $(LOCAL_RPC)
+		--rpc-url $(RPC_URL)
 
-# ── Send ─────────────────────────────────────────────────────────────────────
+# ── Send ───────────────────────────────────────────────────────────────────────────
 
 bridge:
 	$(eval FEE := $(shell cast call $(LOCAL_PAYE_ADDRESS) \
 		"quoteSend((uint32,bytes32,uint256,uint256,bytes,bytes,bytes),bool)((uint256,uint256))" \
 		"($(REMOTE_EID),$(RECIPIENT_B32),$(RAW_AMOUNT),$(RAW_AMOUNT),$(LZ_OPTIONS),0x,0x)" \
 		false \
-		--rpc-url $(LOCAL_RPC) | awk -F'[, ]+' '{gsub(/[()]/,""); print $$1}'))
+		--rpc-url $(RPC_URL) | awk -F'[, ]+' '{gsub(/[()]/,""); print $$1}'))
 	@echo "Bridging $(AMOUNT) PAYE → EID $(REMOTE_EID) → $(RECIPIENT_B32)"
 	@echo "Fee: $(FEE) wei"
 	cast send $(LOCAL_PAYE_ADDRESS) \
@@ -128,7 +113,7 @@ bridge:
 		"($(REMOTE_EID),$(RECIPIENT_B32),$(RAW_AMOUNT),$(RAW_AMOUNT),$(LZ_OPTIONS),0x,0x)" \
 		"($(FEE),0)" \
 		"$(TREASURY_ADDRESS)" \
-		--rpc-url $(LOCAL_RPC) \
+		--rpc-url $(RPC_URL) \
 		--value $(FEE) \
 		--account $(BRIDGE_ACCOUNT)
 
@@ -136,18 +121,10 @@ bridge:
 
 DEPLOYER_ADDRESS ?= $(shell cast wallet address --account $(ACCOUNT))
 
-nonce-home:
-	@cast nonce $(DEPLOYER_ADDRESS) --rpc-url $(HOME_RPC_URL)
+nonce:
+	@cast nonce $(DEPLOYER_ADDRESS) --rpc-url $(RPC_URL)
 
-nonce-remote:
-	@cast nonce $(DEPLOYER_ADDRESS) --rpc-url $(REMOTE_RPC_URL)
+balance:
+	@cast call $(LOCAL_PAYE_ADDRESS) "balanceOf(address)(uint256)" $(TREASURY_ADDRESS) --rpc-url $(RPC_URL)
 
-nonce: nonce-home nonce-remote
-
-balance-home:
-	@cast call $(LOCAL_PAYE_ADDRESS) "balanceOf(address)(uint256)" $(TREASURY_ADDRESS) --rpc-url $(HOME_RPC_URL)
-
-balance-remote:
-	@cast call $(LOCAL_PAYE_ADDRESS) "balanceOf(address)(uint256)" $(TREASURY_ADDRESS) --rpc-url $(REMOTE_RPC_URL)
-
-.PHONY: build test test-v clean deploy-home deploy-remote wire-home wire-remote wire dry-deploy-home dry-deploy-remote nonce-home nonce-remote nonce quote-home-to-remote quote-remote-to-home bridge-home-to-remote bridge-remote-to-home balance-home balance-remote
+.PHONY: build test test-v clean deploy dry-deploy wire nonce balance

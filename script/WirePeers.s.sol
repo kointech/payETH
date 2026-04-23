@@ -34,7 +34,7 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  *         contract on a peer chain.  Must be run by the contract owner (treasury).
  *
  * @dev    This script runs on a SINGLE chain at a time.  Run it once for each
- *         direction of the bridge (e.g. Ethereum → Linea, then Linea → Ethereum).
+ *         direction of the bridge (e.g. Linea → Base, then Base → Linea).
  *
  *         Required environment variables:
  *           LOCAL_PAYE_ADDRESS   — address of PAYEToken on THIS chain
@@ -51,13 +51,13 @@ import {PAYEToken} from "../src/PAYEToken.sol";
  *           Base Sepolia     : 40287
  *           Solana Devnet    : 40168
  *
- * Usage (Ethereum side):
+ * Usage (Linea side — home chain):
  *   forge script script/WirePeers.s.sol \
- *     --rpc-url $ETH_RPC_URL \
+ *     --rpc-url $LINEA_RPC_URL \
  *     --account deployer \
  *     --broadcast
  *
- * Usage (Linea side):
+ * Usage (remote chain side):
  *   forge script script/WirePeers.s.sol \
  *     --rpc-url $LINEA_RPC_URL \
  *     --account deployer \

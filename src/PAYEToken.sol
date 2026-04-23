@@ -31,13 +31,16 @@
 //   - No backdoors; contract logic is fully transparent and auditable
 //
 // CROSS-CHAIN ARCHITECTURE:
-//   Home chain  (Ethereum)  — deploys with initialSupply = 125_000_000 × 10^4
-//   Remote chains (Linea, …) — deploys with initialSupply = 0  (supply arrives via bridge)
+//   Home chain  (Linea)  — deploys with initialSupply = 125_000_000 × 10^4
+//   Remote chains (Base, …) — deploys with initialSupply = 0  (supply arrives via bridge)
 //   All deployments must be wired together with setPeer() before any bridging
 
 pragma solidity 0.8.30;
 
 import {OFT} from "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/OFT.sol";
+import {
+    SetConfigParam
+} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/IMessageLibManager.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -67,7 +70,7 @@ contract PAYEToken is OFT, Ownable2Step {
 
     // ─── Immutables ───────────────────────────────────────────────────────────
 
-    /// @notice True on the Ethereum home-chain deployment where the full supply was minted.
+    /// @notice True on the Linea home-chain deployment where the full supply was minted.
     // slither-disable-next-line naming-convention
     bool public immutable isHomeChain;
 
@@ -136,7 +139,7 @@ contract PAYEToken is OFT, Ownable2Step {
      *                      Also becomes the initial owner / delegate.
      * @param initialSupply Amount of PAYE (in smallest units, i.e. × 10**18) to mint
      *                      at deployment.  Must be 0 on remote chains.
-     * @param _isHomeChain  Must be `true` iff this is the Ethereum home-chain deployment.
+     * @param _isHomeChain  Must be `true` iff this is the Linea home-chain deployment.
      *                      Explicitly provided to prevent silent mis-deployment when a
      *                      non-zero initialSupply is passed to a remote chain by mistake.
      */
@@ -280,6 +283,29 @@ contract PAYEToken is OFT, Ownable2Step {
     function disableDeveloper() external onlyOwner {
         developerEnabled = false;
         emit DeveloperToggled(false);
+    }
+
+    // ─── LayerZero configuration (owner or developer) ─────────────────────────
+
+    /**
+     * @notice Sets a LayerZero message-library configuration parameter for this OApp.
+     * @dev    EndpointV2.setConfig() normally requires the caller to be the registered
+     *         delegate (set to `treasury` in our constructor).  When this contract calls
+     *         setConfig on *itself*, the endpoint's delegate check is bypassed, so the
+     *         developer role can configure executor, ULN, and DVN settings without
+     *         requiring treasury to sign a transaction.
+     *
+     *         CONFIG_TYPE_EXECUTOR = 1 → abi.encode(ExecutorConfig)  (send libs only)
+     *         CONFIG_TYPE_ULN      = 2 → abi.encode(UlnConfig)       (send + receive libs)
+     *
+     * @param lib    Address of the message library (SendUln302 or ReceiveUln302).
+     * @param params Encoded configuration parameters (one entry per remote EID).
+     */
+    function setLzConfig(
+        address lib,
+        SetConfigParam[] calldata params
+    ) external onlyOwnerOrDeveloper {
+        endpoint.setConfig(address(this), lib, params);
     }
 
     // ─── Recovery (owner-only) ─────────────────────────────────────────────────
