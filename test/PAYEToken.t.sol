@@ -95,7 +95,7 @@ contract PAYETokenTest is Test {
     }
 
     function test_sharedDecimals() public view {
-        assertEq(homeToken.sharedDecimals(), 18);
+        assertEq(homeToken.sharedDecimals(), 6);
     }
 
     // ── Supply ─────────────────────────────────────────────────────────────────

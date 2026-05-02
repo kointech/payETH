@@ -54,6 +54,21 @@ wire:
 		--broadcast \
 		$(FORGE_FLAGS)
 
+# ─── Configure LayerZero ──────────────────────────────────────────────────────
+# Set LOCAL_PAYE_ADDRESS, REMOTE_EID, and REMOTE_PAYE_ADDRESS (EVM) or
+# REMOTE_PEER_BYTES32 (non-EVM / Solana) in .env, then run once per chain side.
+#
+# Example — Eth Sepolia → Base Sepolia:
+#   From Eth Sepolia: LOCAL_PAYE_ADDRESS=<eth> REMOTE_EID=40245 REMOTE_PAYE_ADDRESS=<base>  RPC_URL=<eth-sep>  make configure
+#   From Base Sepolia: LOCAL_PAYE_ADDRESS=<base> REMOTE_EID=40161 REMOTE_PAYE_ADDRESS=<eth>  RPC_URL=<base-sep>  make configure
+
+configure:
+	forge script script/ConfigureLz.s.sol \
+		--rpc-url $(RPC_URL) \
+		--account $(ACCOUNT) \
+		--broadcast \
+		$(FORGE_FLAGS)
+
 # ─── Dry Run (no broadcast) ──────────────────────────────────────────────────
 
 dry-deploy:
@@ -72,8 +87,8 @@ dry-deploy:
 BRIDGE_ACCOUNT     ?= treasury
 AMOUNT             ?= 10
 GAS_LIMIT          ?= 60000
-PAYE_DECIMALS      := 4
-# Convert human amount → raw units (e.g. 10 → 100000 with 4 decimals)
+PAYE_DECIMALS      := 18
+# Convert human amount → raw units (e.g. 10 → 100000000000000000000 with 18 decimals)
 RAW_AMOUNT          = $(shell echo '$(AMOUNT) * 10 ^ $(PAYE_DECIMALS)' | bc)
 
 # LZ extra options: TYPE_3 + executor(01) + size(0011=17) + gasOption(01) + uint128 gas
@@ -106,6 +121,11 @@ bridge:
 		"($(REMOTE_EID),$(RECIPIENT_B32),$(RAW_AMOUNT),$(RAW_AMOUNT),$(LZ_OPTIONS),0x,0x)" \
 		false \
 		--rpc-url $(RPC_URL) | awk -F'[, ]+' '{gsub(/[()]/,""); print $$1}'))
+	@if [ -z "$(FEE)" ]; then \
+		echo "ERROR: quoteSend returned empty — peer may not be set for EID $(REMOTE_EID)."; \
+		echo "Run 'make configure' first to register the peer and set LZ config."; \
+		exit 1; \
+	fi
 	@echo "Bridging $(AMOUNT) PAYE → EID $(REMOTE_EID) → $(RECIPIENT_B32)"
 	@echo "Fee: $(FEE) wei"
 	cast send $(LOCAL_PAYE_ADDRESS) \
@@ -127,4 +147,4 @@ nonce:
 balance:
 	@cast call $(LOCAL_PAYE_ADDRESS) "balanceOf(address)(uint256)" $(TREASURY_ADDRESS) --rpc-url $(RPC_URL)
 
-.PHONY: build test test-v clean deploy dry-deploy wire nonce balance
+.PHONY: build test test-v clean deploy dry-deploy configure wire nonce balance

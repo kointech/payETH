@@ -31,7 +31,7 @@
 //   - No backdoors; contract logic is fully transparent and auditable
 //
 // CROSS-CHAIN ARCHITECTURE:
-//   Home chain  (Linea)  — deploys with initialSupply = 125_000_000 × 10^4
+//   Home chain  (Linea)  — deploys with initialSupply = 125_000_000 × 10^18
 //   Remote chains (Base, …) — deploys with initialSupply = 0  (supply arrives via bridge)
 //   All deployments must be wired together with setPeer() before any bridging
 
@@ -53,8 +53,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         of 125,000,000 PAYE distributed across all connected chains.
  *
  * @dev Decimals are set to 18 (the ERC-20 standard default).
- *      sharedDecimals() is overridden to 18 so the inter-chain decimal conversion
- *      rate is exactly 1 (no dust loss on any EVM chain).
+ *      sharedDecimals() is overridden to 6 (the LayerZero OFT recommended default).
+ *      This gives a decimalConversionRate of 10^12, keeping bridged amounts well
+ *      within the uint64 cap while limiting dust loss to 10^-6 PAYE per transfer.
  *
  *      Deployment pattern:
  *        • Home chain   → pass initialSupply = 125_000_000 * 10**18
@@ -64,7 +65,7 @@ contract PAYEToken is OFT, Ownable2Step {
     // ─── Constants ────────────────────────────────────────────────────────────
 
     uint8 private constant _DECIMALS = 18;
-    uint8 private constant _SHARED_DECIMALS = 18;
+    uint8 private constant _SHARED_DECIMALS = 6;
     string private constant _NAME = "PayETH";
     string private constant _SYMBOL = "PAYE";
 
@@ -188,8 +189,9 @@ contract PAYEToken is OFT, Ownable2Step {
 
     /**
      * @notice Returns the shared decimal precision used across all chains in the OFT mesh.
-     * @dev    Must be ≤ decimals().  Setting this equal to decimals() means the
-     *         decimalConversionRate == 1, so no dust is ever lost during bridging.
+     * @dev    Must be ≤ decimals().  LayerZero default is 6, which caps bridgeable supply at
+     *         ~18.4 trillion PAYE (uint64.max / 10^6) — far above the 125 M fixed supply.
+     *         The decimalConversionRate is 10^12; amounts smaller than 10^-6 PAYE are lost as dust.
      */
     function sharedDecimals() public pure override returns (uint8) {
         return _SHARED_DECIMALS;

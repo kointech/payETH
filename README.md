@@ -14,7 +14,7 @@ PAYE is the native token of the PayETH project — a single-supply, cross-chain 
 | Token name | PayETH |
 | Symbol | PAYE |
 | Total supply | 125,000,000 PAYE (fixed) |
-| Decimal places | 4 |
+| Decimal places | 18 |
 | Standard | LayerZero OFT v2 |
 | Home chain | Linea (full supply minted here) |
 | Remote chains | Solana (bridged representation) |

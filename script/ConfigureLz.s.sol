@@ -46,114 +46,114 @@ struct UlnConfig {
 
 /**
  * @title  ConfigureLz
- * @notice Sets peer address + full LayerZero library configuration (executor, send ULN,
- *         receive ULN) on a deployed PAYEToken for a single remote endpoint.
+ * @notice Configures a deployed PAYEToken to communicate with ONE remote peer.
+ *         Sets the peer address + executor + send/receive ULN on the local chain.
  *
- * @dev    Run *after* DeployHome / DeployRemote.  Must be called by the developer
- *         wallet (msg.sender from the `--account` flag) because PAYEToken.setLzConfig()
- *         is gated by `onlyOwnerOrDeveloper`.
+ * @dev    Run once per direction.  To wire two chains, run from each side:
+ *           1. Set env vars for the remote you want to connect to.
+ *           2. Run with RPC_URL pointing at THIS chain.
+ *           3. Repeat with RPC_URL pointing at the OTHER chain (swapping LOCAL/REMOTE).
  *
- *         Run once per EVM chain.  The script auto-detects the current chain via
- *         `block.chainid` and loads the corresponding hardcoded LZ infrastructure
- *         addresses (SendUln302, ReceiveUln302, LZ Executor, LZ Labs DVN).
+ *         Auto-detects local LZ infrastructure (SendUln302, ReceiveUln302, Executor,
+ *         DVN) from block.chainid.  Only REMOTE_EID and peer address come from env.
  *
- *         Infrastructure addresses were sourced from the LayerZero metadata API:
- *           https://metadata.layerzero-api.com/v1/metadata
- *           https://metadata.layerzero-api.com/v1/metadata/dvns
- *         and cross-referenced against https://docs.layerzero.network/v2/deployments/deployed-contracts
+ *         Must be called by the developer wallet (`--account developer`).
  *
  * ─── Required environment variables ──────────────────────────────────────────
- *   LOCAL_PAYE_ADDRESS   — address of PAYEToken on THIS chain
- *   SOLANA_PAYE_PEER     — bytes32 peer address of the Solana PAYE OFT program
- *                          (the OFT store PDA, left-padded to 32 bytes)
+ *   LOCAL_PAYE_ADDRESS    — PAYEToken on THIS chain
+ *   REMOTE_EID            — LayerZero EID of the peer chain
+ *   REMOTE_PAYE_ADDRESS   — PAYEToken address on the peer EVM chain
+ *                           (mutually exclusive with REMOTE_PEER_BYTES32)
+ *   REMOTE_PEER_BYTES32   — raw bytes32 peer for non-EVM chains (e.g. Solana)
+ *                           (takes precedence over REMOTE_PAYE_ADDRESS if set)
  *
  * ─── LayerZero EIDs ──────────────────────────────────────────────────────────
- *   Mainnet chains (30xxx):
- *     Ethereum  : 30101   (chain ID 1)
- *     Linea     : 30183   (chain ID 59144)
- *     Base      : 30184   (chain ID 8453)
- *     Solana    : 30168
+ *   Mainnet:  Linea 30183 | Base 30184 | Solana 30168
+ *   Testnet:  Eth Sepolia 40161 | Base Sepolia 40245 | Linea Sepolia 40287 | Solana Devnet 40168
  *
- *   Testnet chains (40xxx):
- *     Eth Sepolia  : 40161   (chain ID 11155111)
- *     Base Sepolia : 40245   (chain ID 84532)
- *     Linea Sepolia: 40287   (chain ID 59141)
- *     Solana Devnet: 40168
+ * ─── Example: wire Eth Sepolia ↔ Base Sepolia ────────────────────────────────
+ *   # From Eth Sepolia side:
+ *   LOCAL_PAYE_ADDRESS=<eth-sep-addr>  REMOTE_EID=40245  REMOTE_PAYE_ADDRESS=<base-sep-addr>
+ *   RPC_URL=<eth-sepolia-rpc>  make configure
  *
- * ─── Usage ────────────────────────────────────────────────────────────────────
- *   # Ethereum mainnet — developer wallet signs
- *   forge script script/ConfigureLz.s.sol \
- *     --rpc-url $ETH_RPC_URL \
- *     --account developer \
- *     --broadcast
- *
- *   # Base Sepolia testnet
- *   forge script script/ConfigureLz.s.sol \
- *     --rpc-url $BASE_SEPOLIA_RPC_URL \
- *     --account developer \
- *     --broadcast
+ *   # From Base Sepolia side:
+ *   LOCAL_PAYE_ADDRESS=<base-sep-addr>  REMOTE_EID=40161  REMOTE_PAYE_ADDRESS=<eth-sep-addr>
+ *   RPC_URL=<base-sepolia-rpc>  make configure
  */
 contract ConfigureLz is Script {
-    // ─── Chain configuration ──────────────────────────────────────────────────
+    // ─── Chain infrastructure (local chain only) ──────────────────────────────
 
     struct ChainConfig {
         address sendUln302;
         address receiveUln302;
-        address executor; // LZ Executor contract on this chain
-        address dvn; // LZ Labs DVN on this chain
-        uint32 remoteEid; // Solana EID for this environment
-        uint64 confirmations; // Block confirmations required on both sides
+        address executor;
+        address[] dvns; // required DVNs — must be sorted ascending by address
+        address[] optionalDvns; // optional DVNs — must be sorted ascending by address
+        uint8 optionalDvnThreshold;
+        uint64 confirmations;
     }
 
     // ─── Run ─────────────────────────────────────────────────────────────────
 
     function run() external {
         address localPaye = vm.envAddress("LOCAL_PAYE_ADDRESS");
-        bytes32 solanaPeer = vm.envBytes32("SOLANA_PAYE_PEER");
+        uint32 remoteEid = uint32(vm.envUint("REMOTE_EID"));
 
         require(localPaye != address(0), "ConfigureLz: zero local paye");
-        require(solanaPeer != bytes32(0), "ConfigureLz: zero solana peer");
+        require(remoteEid != 0, "ConfigureLz: zero remote eid");
+
+        // Resolve remote peer: prefer REMOTE_PEER_BYTES32 (non-EVM), else pad address.
+        bytes32 remotePeer;
+        bytes memory rawBytes32 = vm.envOr("REMOTE_PEER_BYTES32", bytes(""));
+        if (rawBytes32.length > 0) {
+            remotePeer = vm.envBytes32("REMOTE_PEER_BYTES32");
+        } else {
+            address remoteAddr = vm.envAddress("REMOTE_PAYE_ADDRESS");
+            require(
+                remoteAddr != address(0),
+                "ConfigureLz: zero remote paye address"
+            );
+            remotePeer = bytes32(uint256(uint160(remoteAddr)));
+        }
 
         ChainConfig memory cfg = _getChainConfig();
 
-        // ── Build config param arrays ────────────────────────────────────────
+        // ── Encode lib configs ───────────────────────────────────────────────
 
-        // Executor config (send lib only — instructs executor on outbound messages)
-        SetConfigParam[] memory execParams = new SetConfigParam[](1);
-        execParams[0] = SetConfigParam({
-            eid: cfg.remoteEid,
-            configType: CONFIG_TYPE_EXECUTOR,
-            config: abi.encode(
-                ExecutorConfig({maxMessageSize: 10_000, executor: cfg.executor})
-            )
-        });
+        bytes memory execConfig = abi.encode(
+            ExecutorConfig({maxMessageSize: 10_000, executor: cfg.executor})
+        );
 
-        // ULN config — same struct for both send and receive libs
-        address[] memory dvns = new address[](1);
-        dvns[0] = cfg.dvn;
-        bytes memory ulnBytes = abi.encode(
+        bytes memory ulnConfig = abi.encode(
             UlnConfig({
                 confirmations: cfg.confirmations,
-                requiredDVNCount: 1,
-                optionalDVNCount: 0,
-                optionalDVNThreshold: 0,
-                requiredDVNs: dvns,
-                optionalDVNs: new address[](0)
+                requiredDVNCount: uint8(cfg.dvns.length),
+                optionalDVNCount: uint8(cfg.optionalDvns.length),
+                optionalDVNThreshold: cfg.optionalDvnThreshold,
+                requiredDVNs: cfg.dvns,
+                optionalDVNs: cfg.optionalDvns
             })
         );
 
+        SetConfigParam[] memory execParams = new SetConfigParam[](1);
+        execParams[0] = SetConfigParam({
+            eid: remoteEid,
+            configType: CONFIG_TYPE_EXECUTOR,
+            config: execConfig
+        });
+
         SetConfigParam[] memory sendUlnParams = new SetConfigParam[](1);
         sendUlnParams[0] = SetConfigParam({
-            eid: cfg.remoteEid,
+            eid: remoteEid,
             configType: CONFIG_TYPE_ULN,
-            config: ulnBytes
+            config: ulnConfig
         });
 
         SetConfigParam[] memory recvUlnParams = new SetConfigParam[](1);
         recvUlnParams[0] = SetConfigParam({
-            eid: cfg.remoteEid,
+            eid: remoteEid,
             configType: CONFIG_TYPE_ULN,
-            config: ulnBytes
+            config: ulnConfig
         });
 
         // ── Broadcast ────────────────────────────────────────────────────────
@@ -162,93 +162,108 @@ contract ConfigureLz is Script {
 
         PAYEToken paye = PAYEToken(payable(localPaye));
 
-        // 1. Register Solana peer
-        paye.setPeer(cfg.remoteEid, solanaPeer);
-
-        // 2. Executor config (applies to outbound messages only — send lib)
+        paye.setPeer(remoteEid, remotePeer);
         paye.setLzConfig(cfg.sendUln302, execParams);
-
-        // 3. Send ULN config (DVN + confirmations for outbound messages)
         paye.setLzConfig(cfg.sendUln302, sendUlnParams);
-
-        // 4. Receive ULN config (DVN + confirmations for inbound messages from Solana)
         paye.setLzConfig(cfg.receiveUln302, recvUlnParams);
 
         vm.stopBroadcast();
 
-        // ── Log ───────────────────────────────────────────────────────────────
-
         console2.log("=== ConfigureLz ===");
-        console2.log("Chain ID        :", block.chainid);
-        console2.log("Local PAYE      :", localPaye);
-        console2.log("Remote EID      :", cfg.remoteEid);
-        console2.log("Solana peer     :", vm.toString(solanaPeer));
-        console2.log("Confirmations   :", cfg.confirmations);
-        console2.log("LZ DVN          :", cfg.dvn);
-        console2.log("LZ Executor     :", cfg.executor);
-        console2.log("SendUln302      :", cfg.sendUln302);
-        console2.log("ReceiveUln302   :", cfg.receiveUln302);
-        console2.log(
-            "Done: setPeer + executor + send ULN + receive ULN configured."
-        );
+        console2.log("Chain ID      :", block.chainid);
+        console2.log("Local PAYE    :", localPaye);
+        console2.log("Remote EID    :", remoteEid);
+        console2.log("Remote peer   :", vm.toString(remotePeer));
+        console2.log("Confirmations :", cfg.confirmations);
+        for (uint256 i; i < cfg.dvns.length; ++i) {
+            console2.log(
+                string.concat("ReqDVN[", vm.toString(i), "]     :"),
+                cfg.dvns[i]
+            );
+        }
+        for (uint256 i; i < cfg.optionalDvns.length; ++i) {
+            console2.log(
+                string.concat("OptDVN[", vm.toString(i), "]     :"),
+                cfg.optionalDvns[i]
+            );
+        }
+        console2.log("Opt threshold :", cfg.optionalDvnThreshold);
+        console2.log("Executor      :", cfg.executor);
+        console2.log("Done.");
     }
 
-    // ─── Chain config lookup ──────────────────────────────────────────────────
+    // ─── Local chain infrastructure lookup ───────────────────────────────────
 
     function _getChainConfig() internal view returns (ChainConfig memory cfg) {
         uint256 id = block.chainid;
 
         // ── Mainnet ──────────────────────────────────────────────────────────
-        if (id == 1) {
-            // Ethereum mainnet  (EID 30101)
-            cfg.sendUln302 = 0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1;
-            cfg.receiveUln302 = 0xc02Ab410f0734EFa3F14628780e6e695156024C2;
-            cfg.executor = 0x173272739Bd7Aa6e4e214714048a9fE699453059;
-            cfg.dvn = 0x589dEDbD617e0CBcB916A9223F4d1300c294236b;
-            cfg.remoteEid = 30168; // Solana mainnet
-            cfg.confirmations = 15;
-        } else if (id == 59144) {
-            // Linea mainnet  (EID 30183)
+        if (id == 59144) {
+            // Linea mainnet (EID 30183) — home chain
             cfg.sendUln302 = 0x32042142DD551b4EbE17B6FEd53131dd4b4eEa06;
             cfg.receiveUln302 = 0xE22ED54177CE1148C557de74E4873619e6c6b205;
             cfg.executor = 0x0408804C5dcD9796F22558464E6fE5bDdF16A7c7;
-            cfg.dvn = 0x129Ee430Cb2Ff2708CCADDBDb408a88Fe4FFd480;
-            cfg.remoteEid = 30168; // Solana mainnet
             cfg.confirmations = 15;
+            cfg.dvns = new address[](1);
+            cfg.dvns[0] = 0x129Ee430Cb2Ff2708CCADDBDb408a88Fe4FFd480; // LZ Labs
         } else if (id == 8453) {
-            // Base mainnet  (EID 30184)
+            // Base mainnet (EID 30184)
             cfg.sendUln302 = 0xB5320B0B3a13cC860893E2Bd79FCd7e13484Dda2;
             cfg.receiveUln302 = 0xc70AB6f32772f59fBfc23889Caf4Ba3376C84bAf;
             cfg.executor = 0x2CCA08ae69E0C44b18a57Ab2A87644234dAebaE4;
-            cfg.dvn = 0x9e059a54699a285714207b43B055483E78FAac25;
-            cfg.remoteEid = 30168; // Solana mainnet
             cfg.confirmations = 15;
+            cfg.dvns = new address[](1);
+            cfg.dvns[0] = 0x9e059a54699a285714207b43B055483E78FAac25; // LZ Labs
 
             // ── Testnet ───────────────────────────────────────────────────────────
         } else if (id == 11155111) {
-            // Ethereum Sepolia  (EID 40161)
+            // Eth Sepolia (EID 40161)
+            // ----------------------------------------------------------------
+            // Required DVNs — MUST be sorted ascending by address.
+            // Nethermind : 0x68802e01D6321D5159208478f297d7007A7516Ed
+            // LZ Labs    : 0x8eebf8b423B73bFCa51a1Db4B7354AA0bFCA9193
+            // Optional DVNs (threshold 1) — MUST be sorted ascending by address.
+            // P2P        : 0x9efBA56c8598853E5b40FD9a66B54a6c163742d7
+            // NOTE: Horizen excluded — DVN_EidNotSupported(40245) on Eth Sepolia
+            // ----------------------------------------------------------------
             cfg.sendUln302 = 0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE;
             cfg.receiveUln302 = 0xdAf00F5eE2158dD58E0d3857851c432E34A3A851;
             cfg.executor = 0x718B92b5CB0a5552039B593faF724D182A881eDA;
-            cfg.dvn = 0x8eebf8b423B73bFCa51a1Db4B7354AA0bFCA9193;
-            cfg.remoteEid = 40168; // Solana Devnet
             cfg.confirmations = 1;
+            cfg.dvns = new address[](2);
+            cfg.dvns[0] = 0x68802e01D6321D5159208478f297d7007A7516Ed; // Nethermind
+            cfg.dvns[1] = 0x8eebf8b423B73bFCa51a1Db4B7354AA0bFCA9193; // LZ Labs
+            cfg.optionalDvns = new address[](1);
+            cfg.optionalDvns[0] = 0x9efBA56c8598853E5b40FD9a66B54a6c163742d7; // P2P
+            cfg.optionalDvnThreshold = 1;
         } else if (id == 84532) {
-            // Base Sepolia  (EID 40245)
+            // Base Sepolia (EID 40245)
+            // ----------------------------------------------------------------
+            // Required DVNs — MUST be sorted ascending by address.
+            // Nethermind : 0xd9222CC3Ccd1DF7c070d700EA377D4aDA2B86Eb5
+            // LZ Labs    : 0xe1a12515F9AB2764b887bF60B923Ca494EBbB2d6
+            // Optional DVNs (threshold 1) — MUST be sorted ascending by address.
+            // P2P        : 0x63ef73671245D1A290F2a675Be9D906090f72a8D
+            // NOTE: Horizen excluded — DVN_EidNotSupported on this path
+            // ----------------------------------------------------------------
             cfg.sendUln302 = 0xC1868e054425D378095A003EcbA3823a5D0135C9;
             cfg.receiveUln302 = 0x12523de19dc41c91F7d2093E0CFbB76b17012C8d;
             cfg.executor = 0x8A3D588D9f6AC041476b094f97FF94ec30169d3D;
-            cfg.dvn = 0xBf6FF58f60606EdF2F190769B951d825Bcb214e2;
-            cfg.remoteEid = 40168; // Solana Devnet
             cfg.confirmations = 1;
+            cfg.dvns = new address[](2);
+            cfg.dvns[0] = 0xd9222CC3Ccd1DF7c070d700EA377D4aDA2B86Eb5; // Nethermind
+            cfg.dvns[1] = 0xe1a12515F9AB2764b887bF60B923Ca494EBbB2d6; // LZ Labs
+            cfg.optionalDvns = new address[](1);
+            cfg.optionalDvns[0] = 0x63ef73671245D1A290F2a675Be9D906090f72a8D; // P2P
+            cfg.optionalDvnThreshold = 1;
         } else if (id == 59141) {
-            // Linea Sepolia  (EID 40287)
+            // Linea Sepolia (EID 40287)
             cfg.sendUln302 = 0x53fd4C4fBBd53F6bC58CaE6704b92dB1f360A648;
             cfg.receiveUln302 = 0x9eCf72299027e8AeFee5DC5351D6d92294F46d2b;
             cfg.executor = 0xe1a12515F9AB2764b887bF60B923Ca494EBbB2d6;
-            cfg.dvn = 0x701f3927871EfcEa1235dB722f9E608aE120d243;
-            cfg.remoteEid = 40168; // Solana Devnet
             cfg.confirmations = 1;
+            cfg.dvns = new address[](1);
+            cfg.dvns[0] = 0x701f3927871EfcEa1235dB722f9E608aE120d243; // LZ Labs
         } else {
             revert("ConfigureLz: unsupported chain");
         }
